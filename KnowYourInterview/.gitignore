@@ -1,0 +1,22 @@
+# Backend (Java/Maven)
+api/target/
+api/.mvn/wrapper/maven-wrapper.jar
+
+# Frontend (web/mobile, once generated)
+node_modules/
+dist/
+.expo/
+.expo-shared/
+
+# Env / secrets
+.env
+.env.local
+*.pem
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store

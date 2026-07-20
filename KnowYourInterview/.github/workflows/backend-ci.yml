@@ -1,0 +1,42 @@
+name: backend-ci
+
+on:
+  push:
+    paths:
+      - "api/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "api/**"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: kyi
+          POSTGRES_USER: kyi
+          POSTGRES_PASSWORD: kyi_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kyi -d kyi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Build and test
+        working-directory: api
+        run: mvn -B verify
