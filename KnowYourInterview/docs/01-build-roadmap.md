@@ -75,9 +75,9 @@ Durations assume part-time solo pace.
 
 **Phase 0 — Kickoff & design (0.5–1 wk):** domain model, core user flow, MVP scope; PRD + ERD + endpoint list + wireframes. _(Done — see 02-phase0-design.md.)_
 
-**Phase 1 — Walking skeleton (1 wk):** monorepo scaffolded; Docker Compose Postgres+Redis; one health path web↔API↔mobile; CI. _(Scaffold done; first run pending.)_
+**Phase 1 — Walking skeleton (1 wk):** monorepo scaffolded; Docker Compose Postgres+Redis; one health path web↔API↔mobile; CI. _(Done for web + API — confirmed running end to end and pushed to GitHub. Mobile deferred — see 04-handoff.md.)_
 
-**Phase 2 — Auth & accounts (1–1.5 wk):** signup/login/logout/reset, JWT, roles, protected routes on web + mobile.
+**Phase 2 — Auth & accounts (1–1.5 wk):** signup/login/logout/reset, JWT, roles, protected routes on web + mobile. _(Done for web — JWT auth, register/login/refresh/logout, stubbed password reset. Mobile deferred. See 04-handoff.md.)_
 
 **Phase 3 — Core domain (2–4 wk):** structured submission form; admin review queue; approve/reject → publish; browse with teasers; migrations, validation, tests.
 

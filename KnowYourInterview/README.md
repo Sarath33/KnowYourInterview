@@ -14,7 +14,7 @@ Java 21 · Spring Boot 4.1 · Maven | React 19 + Vite + TypeScript | Expo/React 
 
 ```
 api/        Spring Boot REST API (source of truth for business logic)
-web/        React web app (not generated yet — see web/README.md)
+web/        React web app, wired to the API (auth included)
 mobile/     Expo mobile app (not generated yet — see mobile/README.md)
 shared/     TypeScript API contract types, shared by web + mobile
 docs/       Product design, roadmap, setup guide, handoff notes
@@ -26,10 +26,12 @@ See [`docs/03-setup-guide.md`](docs/03-setup-guide.md) for full fresh-machine se
 
 ```bash
 docker compose up -d                     # Postgres + Redis
-cd api && mvn -N wrapper:wrapper -Dmaven=3.9.9
-./mvnw spring-boot:run                   # http://localhost:8080/api/v1/health
+cd api && ./mvnw spring-boot:run         # http://localhost:8080/api/v1/health
+cd ../web && npm run dev                 # http://localhost:5173
 ```
+
+Register an account at `http://localhost:5173` to try auth end to end. To make yourself an admin: `UPDATE users SET is_admin = true WHERE email = '...';` (see `docs/04-handoff.md`).
 
 ## Status
 
-Phase 1 (walking skeleton) generated: monorepo, Spring Boot health endpoint + test, Flyway schema, docker-compose, shared types. Not yet run/verified locally — that's the next step. See `docs/04-handoff.md`.
+Phase 1 (web-first walking skeleton) and Phase 2 (JWT authentication) are done — backend + web app confirmed running locally, pushed to GitHub. Mobile deferred. See `docs/04-handoff.md` for the full picture and what's next (Phase 3: core domain).

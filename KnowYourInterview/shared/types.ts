@@ -130,3 +130,28 @@ export interface AuthResponse {
   refreshToken: string;
   user: User;
 }
+
+export interface RefreshRequest {
+  refreshToken: string;
+}
+
+export interface LogoutRequest {
+  refreshToken: string;
+}
+
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  newPassword: string;
+}
+
+export interface ApiErrorBody {
+  timestamp: string;
+  status: number;
+  error: string;
+  message: string;
+  fieldErrors?: Record<string, string>;
+}
