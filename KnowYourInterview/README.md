@@ -32,6 +32,8 @@ cd ../web && npm run dev                 # http://localhost:5173
 
 Register an account at `http://localhost:5173` to try it end to end: create a draft submission, add a round, upload a proof file, submit it for review. To make yourself an admin (needed to approve/reject from the "Admin review" tab): `UPDATE users SET is_admin = true WHERE email = '...';` (see `docs/04-handoff.md`).
 
+To try the paid unlock flow, set `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` (Test Mode keys from your Razorpay dashboard) as env vars before starting the API, publish an experience as admin, then "Unlock" it from the browse tab as a different (viewer) account. Contributor payouts are a manual-batch process for now (no RazorpayX account yet) — approve an experience as admin, then use the "Admin payouts" tab to record it once you've sent the money yourself.
+
 ## Status
 
-Phases 1–3 are done for web (walking skeleton, JWT auth, submission/review/browse flow) — confirmed running locally, pushed to GitHub. Mobile deferred. See `docs/04-handoff.md` for the full picture and what's next (Phase 4: Razorpay payments + entitlements).
+Phases 1–4 are done for web (walking skeleton, JWT auth, submission/review/browse flow, Razorpay viewer-side unlock payments, manual-batch contributor payouts) — confirmed running locally, pushed to GitHub. Live RazorpayX transfers not built (needs a Current Account with separate business KYC approval you don't have yet). Mobile deferred. See `docs/04-handoff.md` for the full picture and what's next.

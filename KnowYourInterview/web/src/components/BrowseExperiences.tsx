@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ExperienceTeaser } from "../../../shared/types";
 import * as api from "../lib/api";
 
-export function BrowseExperiences() {
+export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: string) => void }) {
   const [items, setItems] = useState<ExperienceTeaser[]>([]);
   const [company, setCompany] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -54,6 +54,10 @@ export function BrowseExperiences() {
               {exp.level && <span>({exp.level})</span>} — ₹{(exp.pricePaise / 100).toFixed(2)}
               <br />
               <span>{exp.teaser}</span>
+              <br />
+              <button type="button" onClick={() => onSelect(exp.id)}>
+                View
+              </button>
             </li>
           ))}
         </ul>

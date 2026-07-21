@@ -126,6 +126,24 @@ export interface Purchase {
   createdAt: ISODateTime;
 }
 
+/** Response for POST /experiences/:id/purchase — everything the client needs to
+ * open Razorpay Checkout. */
+export interface CreateOrderResponse {
+  experienceId: UUID;
+  razorpayOrderId: string;
+  amountPaise: number;
+  currency: string;
+  razorpayKeyId: string;
+}
+
+/** Body for POST /purchases/confirm — the three fields Razorpay Checkout's success
+ * handler hands back, forwarded as-is for server-side signature verification. */
+export interface ConfirmPaymentRequest {
+  razorpayOrderId: string;
+  razorpayPaymentId: string;
+  razorpaySignature: string;
+}
+
 export interface Entitlement {
   id: UUID;
   experienceId: UUID;
@@ -140,12 +158,30 @@ export interface PayoutAccount {
 
 export type PayoutStatus = "PENDING" | "PROCESSING" | "PAID" | "FAILED";
 
+/** Money movement is currently a manual batch process, not a live RazorpayX transfer
+ * (RazorpayX needs a separate Current Account with its own business KYC approval) —
+ * see docs/04-handoff.md. An admin wires the flat fee themselves and marks it paid. */
 export interface Payout {
   id: UUID;
   experienceId: UUID;
+  company: string;
+  roleTitle: string;
   amountPaise: number;
   status: PayoutStatus;
+  payoutReference?: string;
+  paidAt?: ISODateTime;
   createdAt: ISODateTime;
+}
+
+/** Same as Payout, plus who the contributor is — only returned from the admin queue. */
+export interface PayoutAdminView extends Payout {
+  contributorId: UUID;
+  contributorEmail: string;
+  contributorDisplayName: string;
+}
+
+export interface MarkPayoutPaidRequest {
+  reference?: string;
 }
 
 export interface HealthResponse {

@@ -59,3 +59,10 @@ app:
     # Flat one-time contributor payout (paise) on publish — separate from the viewer
     # price above; per the Phase 0 design these are two independent platform-set amounts.
     contributor-payout-paise: 50000
+  razorpay:
+    # No safe local-dev default for real payment credentials — set these as env vars,
+    # never commit actual values. Test Mode keys from dashboard.razorpay.com are fine
+    # to use locally; they don't move real money.
+    key-id: ${RAZORPAY_KEY_ID:}
+    key-secret: ${RAZORPAY_KEY_SECRET:}
+    webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}

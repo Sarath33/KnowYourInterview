@@ -63,7 +63,9 @@ public class AdminReviewService {
         reviewLogRepository.save(new ReviewLog(
                 UUID.randomUUID(), experienceId, adminId, ReviewLog.Action.APPROVED, null));
 
-        // Ledger-only for now — Phase 4 wires the actual RazorpayX transfer.
+        // Creates the ledger row at PENDING. Money movement itself is a manual batch
+        // process (admin wires it themselves, then marks it paid) rather than a live
+        // RazorpayX transfer — see Payout.java and PayoutService for why.
         payoutRepository.save(new Payout(
                 UUID.randomUUID(), experienceId, experience.getContributorId(), contributorPayoutPaise));
 

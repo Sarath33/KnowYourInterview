@@ -67,6 +67,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/health").permitAll()
                         .requestMatchers("/api/v1/auth/**").permitAll()
+                        // Razorpay calls this server-to-server with no JWT — the
+                        // X-Razorpay-Signature check inside WebhookController is the real
+                        // authentication here, not Spring Security.
+                        .requestMatchers("/api/v1/payments/webhook").permitAll()
                         // Order matters: rules are evaluated top-to-bottom, first match wins.
                         // "/mine" would otherwise also match the "/api/v1/experiences/*" pattern
                         // below (Ant "*" matches exactly one path segment, and "mine" is one),

@@ -11,10 +11,15 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 /**
- * Ledger record created when an experience is approved/published. Actual money
- * movement (RazorpayX transfer) is Phase 4 — for now this just records that a
- * payout is owed, at PENDING status, so nothing about the ledger needs to change
- * once Razorpay integration lands.
+ * Ledger record created when an experience is approved/published. Money movement is
+ * currently a manual batch process, not a live RazorpayX transfer: RazorpayX needs a
+ * separate Current Account with its own business KYC approval, which isn't set up.
+ * An admin wires the contributor's flat fee themselves (bank transfer/UPI) and then
+ * marks this row PAID via markPaid(), optionally recording a reference (e.g. a UPI
+ * transaction ID) for their own reconciliation. Swapping in a real RazorpayX Payout
+ * call later means adding a razorpayxPayoutId-setting path alongside this one — the
+ * PENDING/PROCESSING/PAID/FAILED status model was chosen so that swap doesn't require
+ * a schema change.
  */
 @Entity
 @Table(name = "payouts")
@@ -46,6 +51,12 @@ public class Payout {
     @Column(nullable = false, length = 50)
     private Status status;
 
+    @Column(name = "paid_by_admin_id")
+    private UUID paidByAdminId;
+
+    @Column(name = "payout_reference")
+    private String payoutReference;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -65,5 +76,52 @@ public class Payout {
         Instant now = Instant.now();
         this.createdAt = now;
         this.updatedAt = now;
+    }
+
+    public void markPaid(UUID adminId, String reference) {
+        this.status = Status.PAID;
+        this.paidByAdminId = adminId;
+        this.payoutReference = reference;
+        this.updatedAt = Instant.now();
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public UUID getExperienceId() {
+        return experienceId;
+    }
+
+    public UUID getContributorId() {
+        return contributorId;
+    }
+
+    public int getAmountPaise() {
+        return amountPaise;
+    }
+
+    public String getRazorpayxPayoutId() {
+        return razorpayxPayoutId;
+    }
+
+    public Status getStatus() {
+        return status;
+    }
+
+    public UUID getPaidByAdminId() {
+        return paidByAdminId;
+    }
+
+    public String getPayoutReference() {
+        return payoutReference;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 }

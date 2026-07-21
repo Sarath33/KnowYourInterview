@@ -15,6 +15,12 @@ import type {
   ExperienceView,
   ProofDocument,
   PagedResponse,
+  CreateOrderResponse,
+  ConfirmPaymentRequest,
+  Purchase,
+  Payout,
+  PayoutAdminView,
+  MarkPayoutPaidRequest,
 } from "../../../shared/types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
@@ -211,6 +217,27 @@ export async function openProof(token: string, experienceId: string, proofId: st
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+// --- Payments ---
+
+export async function createPurchaseOrder(token: string, experienceId: string): Promise<CreateOrderResponse> {
+  return request(`/api/v1/experiences/${experienceId}/purchase`, {
+    method: "POST",
+    headers: authHeaders(token),
+  });
+}
+
+export async function confirmPurchase(token: string, body: ConfirmPaymentRequest): Promise<Purchase> {
+  return request("/api/v1/purchases/confirm", {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listMyPurchases(token: string): Promise<Purchase[]> {
+  return request("/api/v1/purchases/mine", { headers: authHeaders(token) });
+}
+
 // --- Admin review ---
 
 export async function adminReviewQueue(token: string): Promise<ExperienceFull[]> {
@@ -230,4 +257,26 @@ export async function adminReject(token: string, id: string, body: RejectRequest
     headers: authHeaders(token),
     body: JSON.stringify(body),
   });
+}
+
+// --- Payouts ---
+
+export async function adminPayoutQueue(token: string): Promise<PayoutAdminView[]> {
+  return request("/api/v1/admin/payouts", { headers: authHeaders(token) });
+}
+
+export async function adminMarkPayoutPaid(
+  token: string,
+  id: string,
+  body: MarkPayoutPaidRequest,
+): Promise<PayoutAdminView> {
+  return request(`/api/v1/admin/payouts/${id}/mark-paid`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listMyPayouts(token: string): Promise<Payout[]> {
+  return request("/api/v1/payouts/mine", { headers: authHeaders(token) });
 }

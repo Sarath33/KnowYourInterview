@@ -81,7 +81,7 @@ Durations assume part-time solo pace.
 
 **Phase 3 — Core domain (2–4 wk):** structured submission form; admin review queue; approve/reject → publish; browse with teasers; migrations, validation, tests. _(Done for web — draft/rounds/proof-upload/submit, admin approve/reject with ledger payout row, public browse + filters. Mobile deferred. See 04-handoff.md.)_
 
-**Phase 4 — Payments & supporting features (1–2 wk):** Razorpay pay-per-experience unlock + entitlement gating; one-time contributor payout; notifications, file uploads, search.
+**Phase 4 — Payments & supporting features (1–2 wk):** Razorpay pay-per-experience unlock + entitlement gating; one-time contributor payout; notifications, file uploads, search. _(Done for web, with one deliberate simplification: viewer-side unlock is real Razorpay (order creation, client-confirm + webhook-backup dual confirmation, real entitlement gating, "My library" view); contributor payouts are a manual-batch process (admin wires the fee themselves, then marks it paid) rather than a live RazorpayX transfer, since RazorpayX needs a separate Current Account with its own business KYC approval that isn't set up. Notifications and search are still open. See 04-handoff.md.)_
 
 **Phase 5 — Hardening & observability (1 wk):** tests (unit/integration/E2E), Sentry, logging, health probes, security pass (validation, rate limiting, secrets, dependency scan, OWASP basics).
 

@@ -22,6 +22,7 @@ import com.knowyourinterview.api.experience.dto.ExperienceTeaserResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceViewResponse;
 import com.knowyourinterview.api.experience.dto.ProofDocumentResponse;
 import com.knowyourinterview.api.experience.dto.RoundRequest;
+import com.knowyourinterview.api.payment.EntitlementRepository;
 
 @Service
 public class ExperienceService {
@@ -30,6 +31,7 @@ public class ExperienceService {
     private final ExperienceRoundRepository roundRepository;
     private final ProofDocumentRepository proofDocumentRepository;
     private final ProofStorageService proofStorageService;
+    private final EntitlementRepository entitlementRepository;
     private final int defaultPricePaise;
 
     public ExperienceService(
@@ -37,11 +39,13 @@ public class ExperienceService {
             ExperienceRoundRepository roundRepository,
             ProofDocumentRepository proofDocumentRepository,
             ProofStorageService proofStorageService,
+            EntitlementRepository entitlementRepository,
             @Value("${app.pricing.default-price-paise}") int defaultPricePaise) {
         this.experienceRepository = experienceRepository;
         this.roundRepository = roundRepository;
         this.proofDocumentRepository = proofDocumentRepository;
         this.proofStorageService = proofStorageService;
+        this.entitlementRepository = entitlementRepository;
         this.defaultPricePaise = defaultPricePaise;
     }
 
@@ -145,10 +149,9 @@ public class ExperienceService {
     }
 
     /**
-     * Public single-experience view. "entitled" here means "can see full content":
-     * true for the owning contributor and for admins (who need it to review), false
-     * otherwise. Real paid entitlements arrive in Phase 4 — until then this is the
-     * complete set of people who can see beyond the teaser.
+     * Public single-experience view. "entitled" (full content) is true for: the owning
+     * contributor, an admin (needs it to review), or a viewer holding a real paid
+     * Entitlement row (Phase 4). Everyone else gets the teaser.
      */
     @Transactional(readOnly = true)
     public ExperienceViewResponse getPublicView(UUID viewerId, boolean viewerIsAdmin, UUID experienceId) {
@@ -160,7 +163,12 @@ public class ExperienceService {
             throw new NotFoundException("Experience not found");
         }
 
-        if (isOwner || viewerIsAdmin) {
+        boolean hasPurchased = viewerId != null
+                && !isOwner
+                && !viewerIsAdmin
+                && entitlementRepository.existsByUserIdAndExperienceId(viewerId, experienceId);
+
+        if (isOwner || viewerIsAdmin || hasPurchased) {
             return ExperienceViewResponse.fullAccess(toFullResponse(experience));
         }
         return ExperienceViewResponse.teaserOnly(ExperienceTeaserResponse.from(experience));
