@@ -26,6 +26,11 @@ spring:
       host: localhost
       port: 6379
 
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
 server:
   port: 8080
 
@@ -42,3 +47,15 @@ app:
     refresh-token-ttl-days: 30
   password-reset:
     token-ttl-minutes: 60
+  storage:
+    # Local-disk proof storage for dev. Swap for an S3-backed implementation of
+    # ProofStorageService in Phase 6 without touching callers.
+    proof-dir: ${PROOF_STORAGE_DIR:./uploads/proof}
+  pricing:
+    # Platform-fixed viewer unlock price (paise), applied to every experience at
+    # creation time — contributors don't set their own price. Tiering by company/role
+    # is a later feature.
+    default-price-paise: 9900
+    # Flat one-time contributor payout (paise) on publish — separate from the viewer
+    # price above; per the Phase 0 design these are two independent platform-set amounts.
+    contributor-payout-paise: 50000

@@ -79,7 +79,7 @@ Durations assume part-time solo pace.
 
 **Phase 2 — Auth & accounts (1–1.5 wk):** signup/login/logout/reset, JWT, roles, protected routes on web + mobile. _(Done for web — JWT auth, register/login/refresh/logout, stubbed password reset. Mobile deferred. See 04-handoff.md.)_
 
-**Phase 3 — Core domain (2–4 wk):** structured submission form; admin review queue; approve/reject → publish; browse with teasers; migrations, validation, tests.
+**Phase 3 — Core domain (2–4 wk):** structured submission form; admin review queue; approve/reject → publish; browse with teasers; migrations, validation, tests. _(Done for web — draft/rounds/proof-upload/submit, admin approve/reject with ledger payout row, public browse + filters. Mobile deferred. See 04-handoff.md.)_
 
 **Phase 4 — Payments & supporting features (1–2 wk):** Razorpay pay-per-experience unlock + entitlement gating; one-time contributor payout; notifications, file uploads, search.
 

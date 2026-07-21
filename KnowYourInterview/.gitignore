@@ -1,6 +1,7 @@
 # Backend (Java/Maven)
 api/target/
 api/.mvn/wrapper/maven-wrapper.jar
+api/uploads/
 
 # Frontend (web/mobile, once generated)
 node_modules/

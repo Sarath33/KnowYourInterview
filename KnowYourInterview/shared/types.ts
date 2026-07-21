@@ -59,7 +59,49 @@ export interface ExperienceFull extends ExperienceTeaser {
   overallDifficulty?: number; // 1-5
   timeline?: string;
   compensation?: string;
+  rejectionReason?: string;
   rounds: ExperienceRound[];
+  proofDocuments: ProofDocument[];
+}
+
+/** Body for both POST /experiences (create draft) and PUT /experiences/:id (edit draft).
+ * No price field — the platform sets it, contributors don't. */
+export interface ExperienceRequest {
+  company: string;
+  roleTitle: string;
+  level?: string;
+  location?: string;
+  isRemote: boolean;
+  interviewMonth?: number; // 1-12
+  interviewYear?: number;
+  outcome: ExperienceOutcome;
+  teaser: string;
+  prepAdvice?: string;
+  overallDifficulty?: number; // 1-5
+  timeline?: string;
+  compensation?: string;
+}
+
+export interface RoundRequest {
+  roundType: string;
+  durationMinutes?: number;
+  questionsAsked?: string;
+  topicsTags?: string[];
+  approach?: string;
+  interviewerBehavior?: string;
+  difficulty?: number; // 1-5
+}
+
+export interface RejectRequest {
+  reason: string;
+}
+
+export interface PagedResponse<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
 }
 
 /** Returned by GET /experiences/:id when the caller doesn't hold an entitlement. */

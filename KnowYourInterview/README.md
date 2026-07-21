@@ -30,8 +30,8 @@ cd api && ./mvnw spring-boot:run         # http://localhost:8080/api/v1/health
 cd ../web && npm run dev                 # http://localhost:5173
 ```
 
-Register an account at `http://localhost:5173` to try auth end to end. To make yourself an admin: `UPDATE users SET is_admin = true WHERE email = '...';` (see `docs/04-handoff.md`).
+Register an account at `http://localhost:5173` to try it end to end: create a draft submission, add a round, upload a proof file, submit it for review. To make yourself an admin (needed to approve/reject from the "Admin review" tab): `UPDATE users SET is_admin = true WHERE email = '...';` (see `docs/04-handoff.md`).
 
 ## Status
 
-Phase 1 (web-first walking skeleton) and Phase 2 (JWT authentication) are done — backend + web app confirmed running locally, pushed to GitHub. Mobile deferred. See `docs/04-handoff.md` for the full picture and what's next (Phase 3: core domain).
+Phases 1–3 are done for web (walking skeleton, JWT auth, submission/review/browse flow) — confirmed running locally, pushed to GitHub. Mobile deferred. See `docs/04-handoff.md` for the full picture and what's next (Phase 4: Razorpay payments + entitlements).
