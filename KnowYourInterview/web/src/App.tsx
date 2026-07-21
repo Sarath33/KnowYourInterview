@@ -10,6 +10,7 @@ import { ExperienceDetail } from "./components/ExperienceDetail";
 import { MyLibrary } from "./components/MyLibrary";
 import { MyPayouts } from "./components/MyPayouts";
 import { AdminPayouts } from "./components/AdminPayouts";
+import { LogoMark, LogOutIcon } from "./components/icons";
 import "./App.css";
 
 function HealthBanner() {
@@ -22,87 +23,95 @@ function HealthBanner() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  if (error) return <p style={{ color: "red" }}>API unreachable: {error}</p>;
-  if (!health) return <p>Checking API…</p>;
+  if (error) return <p className="health-banner is-error">API unreachable: {error}</p>;
+  if (!health || health.status === "UP") return null;
   return (
-    <p>
-      API status: <strong>{health.status}</strong> ({health.service})
+    <p className="health-banner is-error">
+      API status: {health.status} ({health.service})
     </p>
   );
 }
 
-type View = "browse" | "submissions" | "admin" | "library" | "payouts" | "adminPayouts";
+type View = "auth" | "browse" | "submissions" | "admin" | "library" | "payouts" | "adminPayouts";
+
+function NavTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className={`nav-tab${active ? " is-active" : ""}`}>
+      {label}
+    </button>
+  );
+}
 
 function AppContent() {
   const { user, isAuthenticated, logout } = useAuth();
-  const [view, setView] = useState<View>("browse");
+  const [view, setView] = useState<View>("auth");
   const [selectedExperienceId, setSelectedExperienceId] = useState<string | null>(null);
 
-  if (selectedExperienceId) {
-    return (
-      <div style={{ fontFamily: "sans-serif", padding: "2rem" }}>
-        <h1>Know Your Interview</h1>
-        <ExperienceDetail
-          experienceId={selectedExperienceId}
-          onClose={() => setSelectedExperienceId(null)}
-        />
-      </div>
-    );
-  }
+  // Mirrors the design's handleAuthSubmit: land on Browse right after logging in
+  // (only when we were sitting on the auth screen — don't yank someone off another
+  // tab if their session just silently refreshes).
+  useEffect(() => {
+    if (isAuthenticated && view === "auth") setView("browse");
+  }, [isAuthenticated, view]);
+
+  const handleLogout = async () => {
+    await logout();
+    setSelectedExperienceId(null);
+    setView("auth");
+  };
+
+  const selectExperience = (id: string) => setSelectedExperienceId(id);
+  const backToBrowse = () => setSelectedExperienceId(null);
 
   return (
-    <div style={{ fontFamily: "sans-serif", padding: "2rem" }}>
-      <h1>Know Your Interview</h1>
-      <HealthBanner />
+    <div className="app-shell">
+      <nav className="nav-bar">
+        <div className="nav-brand">
+          <LogoMark />
+          <span className="nav-wordmark">Know Your Interview</span>
+        </div>
 
-      {isAuthenticated && user ? (
-        <div style={{ marginTop: "1rem" }}>
-          <p>
-            Signed in as <strong>{user.displayName}</strong> ({user.email})
-            {user.isAdmin && " — admin"}{" "}
-            <button type="button" onClick={() => logout()}>
-              Log out
-            </button>
-          </p>
-
-          <nav style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
-            <button type="button" onClick={() => setView("browse")} disabled={view === "browse"}>
-              Browse
-            </button>
-            <button type="button" onClick={() => setView("library")} disabled={view === "library"}>
-              My library
-            </button>
-            <button type="button" onClick={() => setView("submissions")} disabled={view === "submissions"}>
-              My submissions
-            </button>
-            <button type="button" onClick={() => setView("payouts")} disabled={view === "payouts"}>
-              My payouts
-            </button>
+        {isAuthenticated && user ? (
+          <div className="nav-links">
+            <NavTab label="Browse" active={view === "browse"} onClick={() => setView("browse")} />
+            <NavTab label="My library" active={view === "library"} onClick={() => setView("library")} />
+            <NavTab label="My submissions" active={view === "submissions"} onClick={() => setView("submissions")} />
+            <NavTab label="My payouts" active={view === "payouts"} onClick={() => setView("payouts")} />
             {user.isAdmin && (
               <>
-                <button type="button" onClick={() => setView("admin")} disabled={view === "admin"}>
-                  Admin review
-                </button>
-                <button type="button" onClick={() => setView("adminPayouts")} disabled={view === "adminPayouts"}>
-                  Admin payouts
-                </button>
+                <NavTab label="Admin review" active={view === "admin"} onClick={() => setView("admin")} />
+                <NavTab label="Admin payouts" active={view === "adminPayouts"} onClick={() => setView("adminPayouts")} />
               </>
             )}
-          </nav>
+            <span className="nav-user">{user.displayName}</span>
+            <button type="button" onClick={handleLogout} aria-label="Log out" className="icon-btn">
+              <LogOutIcon />
+            </button>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setView("auth")} className="btn btn-primary">
+            Log in
+          </button>
+        )}
+      </nav>
 
-          {view === "browse" && <BrowseExperiences onSelect={setSelectedExperienceId} />}
-          {view === "library" && <MyLibrary onSelect={setSelectedExperienceId} />}
-          {view === "submissions" && <SubmissionWorkspace />}
-          {view === "payouts" && <MyPayouts />}
-          {view === "admin" && user.isAdmin && <AdminReviewQueue />}
-          {view === "adminPayouts" && user.isAdmin && <AdminPayouts />}
-        </div>
-      ) : (
-        <>
-          <BrowseExperiences onSelect={setSelectedExperienceId} />
-          <AuthForms />
-        </>
-      )}
+      <main className="app-main">
+        <HealthBanner />
+
+        {selectedExperienceId ? (
+          <ExperienceDetail experienceId={selectedExperienceId} onClose={backToBrowse} />
+        ) : (
+          <>
+            {view === "auth" && !isAuthenticated && <AuthForms onGuestBrowse={() => setView("browse")} />}
+            {view === "browse" && <BrowseExperiences onSelect={selectExperience} />}
+            {isAuthenticated && view === "library" && <MyLibrary onSelect={selectExperience} />}
+            {isAuthenticated && view === "submissions" && <SubmissionWorkspace />}
+            {isAuthenticated && view === "payouts" && <MyPayouts />}
+            {isAuthenticated && user?.isAdmin && view === "admin" && <AdminReviewQueue />}
+            {isAuthenticated && user?.isAdmin && view === "adminPayouts" && <AdminPayouts />}
+          </>
+        )}
+      </main>
     </div>
   );
 }

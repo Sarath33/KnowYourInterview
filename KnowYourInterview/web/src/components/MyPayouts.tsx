@@ -9,6 +9,13 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "Something went wrong";
 }
 
+function payoutStatusLabel(status: Payout["status"]) {
+  if (status === "PAID") return <span className="tag tag-success">Paid</span>;
+  if (status === "PROCESSING") return <span className="tag tag-warning">Processing</span>;
+  if (status === "FAILED") return <span className="tag tag-danger">Failed</span>;
+  return <span className="tag tag-neutral">Pending</span>;
+}
+
 export function MyPayouts() {
   const { accessToken } = useAuth();
   const token = accessToken!;
@@ -26,27 +33,39 @@ export function MyPayouts() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (loading) return <p>Loading…</p>;
-
   return (
-    <div style={{ marginTop: "1.5rem" }}>
-      <h2>My payouts</h2>
-      <p style={{ color: "#555" }}>
-        Flat-fee payouts for published experiences. Paid manually for now — you'll be
-        contacted for bank/UPI details when one's owed to you.
+    <div>
+      <h1 className="page-title" style={{ marginBottom: 6 }}>
+        My payouts
+      </h1>
+      <p className="page-subtext" style={{ marginBottom: 24 }}>
+        Flat-fee payouts for published experiences. Paid manually for now — you'll be contacted for
+        bank/UPI details when one's owed to you.
       </p>
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      {payouts.length === 0 ? (
-        <p>Nothing here yet — payouts show up once one of your experiences is published.</p>
+      {error && <p className="error-text" style={{ marginBottom: 16 }}>{error}</p>}
+      {loading ? (
+        <p className="muted">Loading…</p>
+      ) : payouts.length === 0 ? (
+        <p className="muted">Nothing here yet — payouts show up once one of your experiences is published.</p>
       ) : (
-        <ul>
+        <div className="stack-sm">
           {payouts.map((p) => (
-            <li key={p.id} style={{ marginBottom: "0.5rem" }}>
-              {p.company} — {p.roleTitle}: <strong>₹{(p.amountPaise / 100).toFixed(2)}</strong> — {p.status}
-              {p.paidAt && <span> (paid {new Date(p.paidAt).toLocaleDateString()})</span>}
-            </li>
+            <div key={p.id} className="card card-pad-sm row" style={{ justifyContent: "space-between" }}>
+              <div>
+                <div className="card-title" style={{ fontSize: 15 }}>
+                  {p.company} — {p.roleTitle}
+                </div>
+                <span className="price-tag">₹{(p.amountPaise / 100).toFixed(2)}</span>
+                {p.paidAt && (
+                  <span className="muted" style={{ marginLeft: 8, fontSize: 13 }}>
+                    paid {new Date(p.paidAt).toLocaleDateString()}
+                  </span>
+                )}
+              </div>
+              {payoutStatusLabel(p.status)}
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );

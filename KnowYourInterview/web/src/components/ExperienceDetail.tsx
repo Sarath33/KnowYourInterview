@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
-import type { ExperienceFull, ExperienceTeaser, ExperienceView } from "../../../shared/types";
+import type { ExperienceFull, ExperienceTeaser, ExperienceView, User } from "../../../shared/types";
 import * as api from "../lib/api";
 import { loadRazorpayCheckout } from "../lib/razorpay";
 import { useAuth } from "../context/AuthContext";
+import { OutcomeTag, RemoteTag } from "./tags";
+import { ArrowLeftIcon, LockIcon } from "./icons";
+
+function levelLine(exp: { level?: string; location?: string }): string {
+  return [exp.level, exp.location].filter(Boolean).join(" · ") || "—";
+}
 
 export function ExperienceDetail({
   experienceId,
@@ -16,6 +22,7 @@ export function ExperienceDetail({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
+  const [unpublishing, setUnpublishing] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -95,14 +102,29 @@ export function ExperienceDetail({
     }
   };
 
+  const unpublish = async () => {
+    if (!accessToken) return;
+    setError(null);
+    setUnpublishing(true);
+    try {
+      await api.unpublishExperience(accessToken, experienceId);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not unpublish");
+    } finally {
+      setUnpublishing(false);
+    }
+  };
+
   return (
-    <div style={{ marginTop: "1.5rem", border: "1px solid #ccc", padding: "1rem", borderRadius: "6px" }}>
-      <button type="button" onClick={onClose}>
-        ← Back to browse
+    <div>
+      <button type="button" onClick={onClose} className="btn-ghost row" style={{ gap: 6, fontSize: 14, fontWeight: 600, marginBottom: 20 }}>
+        <ArrowLeftIcon />
+        Back to browse
       </button>
 
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      {loading && <p>Loading…</p>}
+      {error && <p className="error-text" style={{ marginBottom: 16 }}>{error}</p>}
+      {loading && <p className="muted">Loading…</p>}
 
       {view && !view.entitled && (
         <TeaserWithUnlock
@@ -112,7 +134,9 @@ export function ExperienceDetail({
           onUnlock={unlock}
         />
       )}
-      {view && view.entitled && <FullExperience full={view.full} />}
+      {view && view.entitled && (
+        <FullExperience full={view.full} user={user} unpublishing={unpublishing} onUnpublish={unpublish} />
+      )}
     </div>
   );
 }
@@ -129,64 +153,154 @@ function TeaserWithUnlock({
   onUnlock: () => void;
 }) {
   return (
-    <div>
-      <h2>
+    <div className="card card-pad-lg" style={{ maxWidth: 640, margin: "0 auto" }}>
+      <div className="card-kicker" style={{ marginBottom: 6 }}>
+        {levelLine(teaser)}
+      </div>
+      <h1 className="page-title" style={{ marginBottom: 14 }}>
         {teaser.company} — {teaser.roleTitle}
-      </h2>
-      {teaser.level && <p>Level: {teaser.level}</p>}
-      <p>{teaser.teaser}</p>
-      <p>
-        <strong>₹{(teaser.pricePaise / 100).toFixed(2)}</strong> to unlock the full write-up: every
-        round, questions asked, prep advice, and outcome details.
+      </h1>
+      <div className="row" style={{ gap: 8, marginBottom: 18 }}>
+        <OutcomeTag outcome={teaser.outcome} />
+        {teaser.isRemote && <RemoteTag />}
+      </div>
+      <p style={{ color: "var(--text-secondary)", fontSize: 15, lineHeight: 1.6 }}>{teaser.teaser}</p>
+      <div className="divider" />
+      <p style={{ fontSize: 15, color: "var(--text-secondary-2)", lineHeight: 1.6 }}>
+        <strong className="price-tag-lg">₹{(teaser.pricePaise / 100).toFixed(2)}</strong>
+        &nbsp;to unlock the full write-up — every round, questions asked, prep advice, and outcome
+        details.
       </p>
       {isAuthenticated ? (
-        <button type="button" onClick={onUnlock} disabled={purchasing}>
+        <button
+          type="button"
+          onClick={onUnlock}
+          disabled={purchasing}
+          className="btn btn-primary btn-block"
+          style={{ padding: 13, fontSize: 15, marginTop: 8 }}
+        >
           {purchasing ? "Opening checkout…" : `Unlock ₹${(teaser.pricePaise / 100).toFixed(2)}`}
+          <LockIcon />
         </button>
       ) : (
-        <p>Log in to unlock this experience.</p>
+        <p style={{ marginTop: 8 }}>
+          <a href="#" onClick={(e) => e.preventDefault()}>
+            Log in
+          </a>{" "}
+          to unlock this experience.
+        </p>
       )}
     </div>
   );
 }
 
-function FullExperience({ full }: { full: ExperienceFull }) {
+function FullExperience({
+  full,
+  user,
+  unpublishing,
+  onUnpublish,
+}: {
+  full: ExperienceFull;
+  user: User | null;
+  unpublishing: boolean;
+  onUnpublish: () => void;
+}) {
+  const hasStats = full.timeline || full.compensation || full.overallDifficulty;
+  const canUnpublish =
+    full.status === "PUBLISHED" && !!user && (user.id === full.contributorId || user.isAdmin);
   return (
-    <div>
-      <h2>
+    <div className="card card-pad-lg" style={{ maxWidth: 720, margin: "0 auto" }}>
+      <div className="card-kicker" style={{ marginBottom: 6 }}>
+        {levelLine(full)}
+      </div>
+      <h1 className="page-title" style={{ marginBottom: 14 }}>
         {full.company} — {full.roleTitle}
-      </h2>
-      {full.level && <p>Level: {full.level}</p>}
-      {full.location && <p>Location: {full.location} {full.isRemote && "(remote)"}</p>}
-      <p>Outcome: {full.outcome}</p>
-      {full.timeline && <p>Timeline: {full.timeline}</p>}
-      {full.compensation && <p>Compensation: {full.compensation}</p>}
-      {full.overallDifficulty && <p>Overall difficulty: {full.overallDifficulty}/5</p>}
+      </h1>
+      <div className="row" style={{ gap: 8, marginBottom: 24 }}>
+        <OutcomeTag outcome={full.outcome} />
+        {full.isRemote && <RemoteTag />}
+      </div>
+
+      {canUnpublish && (
+        <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 20 }}>
+          <button type="button" onClick={onUnpublish} disabled={unpublishing} className="btn-danger-text" style={{ padding: 0 }}>
+            {unpublishing ? "Unpublishing…" : "Unpublish"}
+          </button>{" "}
+          — pulls this from Browse and sends it back through review before it's live
+          again. Anyone who already unlocked it keeps their access.
+        </p>
+      )}
+
+      {hasStats && (
+        <div className="detail-stat-grid">
+          {full.timeline && (
+            <div>
+              <div className="detail-stat-label">Timeline</div>
+              <p style={{ margin: 0, fontSize: 14, color: "var(--text-secondary-2)" }}>{full.timeline}</p>
+            </div>
+          )}
+          {full.compensation && (
+            <div>
+              <div className="detail-stat-label">Compensation</div>
+              <p style={{ margin: 0, fontSize: 14, color: "var(--text-secondary-2)" }}>{full.compensation}</p>
+            </div>
+          )}
+          {full.overallDifficulty && (
+            <div>
+              <div className="detail-stat-label">Overall difficulty</div>
+              <p style={{ margin: 0, fontSize: 14, color: "var(--text-secondary-2)" }}>{full.overallDifficulty}/5</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {full.prepAdvice && (
         <>
-          <h3>Prep advice</h3>
-          <p>{full.prepAdvice}</p>
+          <div className="section-title">Prep advice</div>
+          <p style={{ color: "var(--text-secondary)", fontSize: 14, lineHeight: 1.6, marginTop: 0 }}>
+            {full.prepAdvice}
+          </p>
+          <div className="divider" />
         </>
       )}
-      <h3>Rounds</h3>
+
+      <div className="section-title">Rounds</div>
       {full.rounds.length === 0 ? (
-        <p>No rounds recorded.</p>
+        <p className="muted">No rounds recorded.</p>
       ) : (
-        <ol>
+        <div className="stack-md">
           {full.rounds.map((round) => (
-            <li key={round.id} style={{ marginBottom: "0.75rem" }}>
-              <strong>{round.roundType}</strong>
-              {round.durationMinutes && <span> — {round.durationMinutes} min</span>}
-              {round.difficulty && <span> — difficulty {round.difficulty}/5</span>}
+            <div key={round.id} className="round-card">
+              <div className="round-title">
+                Round {round.roundNumber} — {round.roundType}
+              </div>
+              <div className="round-meta">
+                {round.durationMinutes && <span>{round.durationMinutes} min</span>}
+                {round.difficulty && <span>Difficulty {round.difficulty}/5</span>}
+              </div>
               {round.topicsTags && round.topicsTags.length > 0 && (
-                <p>Topics: {round.topicsTags.join(", ")}</p>
+                <p className="round-field">
+                  <strong>Topics:</strong> {round.topicsTags.join(", ")}
+                </p>
               )}
-              {round.questionsAsked && <p>Questions: {round.questionsAsked}</p>}
-              {round.approach && <p>Approach: {round.approach}</p>}
-              {round.interviewerBehavior && <p>Interviewer: {round.interviewerBehavior}</p>}
-            </li>
+              {round.questionsAsked && (
+                <p className="round-field">
+                  <strong>Questions:</strong> {round.questionsAsked}
+                </p>
+              )}
+              {round.approach && (
+                <p className="round-field">
+                  <strong>Approach:</strong> {round.approach}
+                </p>
+              )}
+              {round.interviewerBehavior && (
+                <p className="round-field">
+                  <strong>Interviewer:</strong> {round.interviewerBehavior}
+                </p>
+              )}
+            </div>
           ))}
-        </ol>
+        </div>
       )}
     </div>
   );

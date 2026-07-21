@@ -16,4 +16,8 @@ public interface ProofStorageService {
     StoredFile store(UUID experienceId, String originalFileName, InputStream content);
 
     InputStream retrieve(String storageKey);
+
+    /** Best-effort delete — called when a proof document or its whole draft is removed.
+     * Implementations should not throw if the file is already gone. */
+    void delete(String storageKey);
 }

@@ -3,10 +3,13 @@ package com.knowyourinterview.api.auth;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -17,6 +20,7 @@ import com.knowyourinterview.api.security.JwtService;
 import com.knowyourinterview.api.security.SecurityConfig;
 
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -31,6 +35,18 @@ class AuthControllerTest {
 
     @MockitoBean
     private AuthService authService;
+
+    // SecurityConfig now wires RateLimitingFilter, which needs this bean to exist —
+    // unused directly by these tests otherwise.
+    @MockitoBean
+    private StringRedisTemplate redisTemplate;
+
+    @BeforeEach
+    void stubRateLimiterCounter() {
+        ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.increment(anyString())).thenReturn(1L);
+    }
 
     private AuthResponse sampleAuthResponse() {
         UserResponse user = new UserResponse(UUID.randomUUID(), "jane@example.com", "Jane", false, Instant.now());

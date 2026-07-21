@@ -169,6 +169,30 @@ export async function listMyExperiences(token: string): Promise<ExperienceFull[]
   return request("/api/v1/experiences/mine", { headers: authHeaders(token) });
 }
 
+export async function deleteProofDocument(token: string, id: string, proofId: string): Promise<void> {
+  return request(`/api/v1/experiences/${id}/proof/${proofId}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+}
+
+/** Draft or rejected only — the API rejects this for any other status. */
+export async function deleteExperience(token: string, id: string): Promise<void> {
+  return request(`/api/v1/experiences/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(token),
+  });
+}
+
+/** Owner or admin — pulls a published experience back to draft so it can be edited and
+ * resubmitted through review. */
+export async function unpublishExperience(token: string, id: string): Promise<ExperienceFull> {
+  return request(`/api/v1/experiences/${id}/unpublish`, {
+    method: "POST",
+    headers: authHeaders(token),
+  });
+}
+
 // --- Experiences (public browse) ---
 
 export async function browseExperiences(params: {

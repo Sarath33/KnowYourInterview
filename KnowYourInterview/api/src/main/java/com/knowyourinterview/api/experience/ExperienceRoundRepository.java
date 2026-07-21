@@ -12,4 +12,6 @@ public interface ExperienceRoundRepository extends JpaRepository<ExperienceRound
     long countByExperienceId(UUID experienceId);
 
     void deleteByIdAndExperienceId(UUID id, UUID experienceId);
+
+    void deleteByExperienceId(UUID experienceId);
 }

@@ -45,44 +45,48 @@ export function AdminPayouts() {
   };
 
   return (
-    <div style={{ marginTop: "1.5rem" }}>
-      <h2>Contributor payouts</h2>
-      <p style={{ color: "#555" }}>
+    <div>
+      <h1 className="page-title" style={{ marginBottom: 6 }}>
+        Contributor payouts
+      </h1>
+      <p className="page-subtext" style={{ marginBottom: 24 }}>
         RazorpayX isn't wired up yet — wire the flat fee to the contributor yourself (bank
         transfer/UPI), then mark it paid here.
       </p>
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      {error && <p className="error-text" style={{ marginBottom: 16 }}>{error}</p>}
       {loading ? (
-        <p>Loading…</p>
+        <p className="muted">Loading…</p>
       ) : queue.length === 0 ? (
-        <p>Nothing owed right now.</p>
+        <p className="muted">Nothing owed right now.</p>
       ) : (
-        queue.map((payout) => (
-          <div
-            key={payout.id}
-            style={{ border: "1px solid #ccc", padding: "1rem", marginBottom: "1rem", maxWidth: 500 }}
-          >
-            <h3>
-              {payout.company} — {payout.roleTitle}
-            </h3>
-            <p>
-              Owed to <strong>{payout.contributorDisplayName}</strong> ({payout.contributorEmail})
-            </p>
-            <p>
-              <strong>₹{(payout.amountPaise / 100).toFixed(2)}</strong> — {payout.status}
-            </p>
-            <div style={{ marginTop: "0.5rem" }}>
-              <input
-                placeholder="Reference (UPI/bank txn ID, optional)"
-                value={referenceDrafts[payout.id] ?? ""}
-                onChange={(e) => setReferenceDrafts({ ...referenceDrafts, [payout.id]: e.target.value })}
-              />
-              <button type="button" onClick={() => markPaid(payout.id)}>
-                Mark paid
-              </button>
+        <div className="stack-md" style={{ gap: 20 }}>
+          {queue.map((payout) => (
+            <div key={payout.id} className="card card-pad-md">
+              <div style={{ fontFamily: "var(--font-heading)", fontWeight: 700, fontSize: 19 }}>
+                {payout.company} — {payout.roleTitle}
+              </div>
+              <p style={{ fontSize: 14, color: "var(--text-secondary)", margin: "8px 0" }}>
+                Owed to <strong>{payout.contributorDisplayName}</strong> ({payout.contributorEmail})
+              </p>
+              <p style={{ margin: "0 0 16px" }}>
+                <span className="price-tag">₹{(payout.amountPaise / 100).toFixed(2)}</span>{" "}
+                <span className="muted" style={{ fontSize: 13 }}>— {payout.status}</span>
+              </p>
+              <div className="row">
+                <input
+                  placeholder="Reference (UPI/bank txn ID, optional)"
+                  value={referenceDrafts[payout.id] ?? ""}
+                  onChange={(e) => setReferenceDrafts({ ...referenceDrafts, [payout.id]: e.target.value })}
+                  className="text-input"
+                  style={{ width: 260 }}
+                />
+                <button type="button" onClick={() => markPaid(payout.id)} className="btn btn-primary">
+                  Mark paid
+                </button>
+              </div>
             </div>
-          </div>
-        ))
+          ))}
+        </div>
       )}
     </div>
   );

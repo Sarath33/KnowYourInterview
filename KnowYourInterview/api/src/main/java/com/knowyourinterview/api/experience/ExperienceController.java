@@ -103,6 +103,25 @@ public class ExperienceController {
         return experienceService.submitForReview(user.id(), id);
     }
 
+    @DeleteMapping("/{id}/proof/{proofId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteProof(
+            @AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID id, @PathVariable UUID proofId) {
+        experienceService.deleteProof(user.id(), id, proofId);
+    }
+
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteExperience(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID id) {
+        experienceService.deleteExperience(user.id(), id);
+    }
+
+    /** Owner or admin — see ExperienceService#unpublish for why both can trigger this. */
+    @PostMapping("/{id}/unpublish")
+    public ExperienceFullResponse unpublish(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID id) {
+        return experienceService.unpublish(user.id(), user.admin(), id);
+    }
+
     @GetMapping("/mine")
     public List<ExperienceFullResponse> mine(@AuthenticationPrincipal AuthenticatedUser user) {
         return experienceService.listMine(user.id());

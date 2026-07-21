@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import type { ExperienceTeaser } from "../../../shared/types";
 import * as api from "../lib/api";
+import { OutcomeTag, RemoteTag } from "./tags";
+import { ArrowRightIcon } from "./icons";
+
+function levelLine(exp: ExperienceTeaser): string {
+  return [exp.level, exp.location].filter(Boolean).join(" · ") || "—";
+}
 
 export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: string) => void }) {
   const [items, setItems] = useState<ExperienceTeaser[]>([]);
@@ -27,40 +33,71 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
   }, []);
 
   return (
-    <div style={{ marginTop: "1.5rem" }}>
-      <h2>Browse published experiences</h2>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          load();
+    <div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          marginBottom: 28,
+          flexWrap: "wrap",
+          gap: 14,
         }}
       >
-        <input placeholder="Filter by company" value={company} onChange={(e) => setCompany(e.target.value)} />
-        <button type="submit">Filter</button>
-      </form>
+        <div>
+          <div className="page-kicker">Marketplace</div>
+          <h1 className="page-title">Browse published experiences</h1>
+        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            load();
+          }}
+          style={{ display: "flex", gap: 8 }}
+        >
+          <input
+            placeholder="Filter by company"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            className="text-input"
+            style={{ width: 220 }}
+          />
+          <button type="submit" className="btn btn-outline">
+            Filter
+          </button>
+        </form>
+      </div>
 
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      {error && <p className="error-text">{error}</p>}
       {loading ? (
-        <p>Loading…</p>
+        <p className="muted">Loading…</p>
       ) : items.length === 0 ? (
-        <p>Nothing published yet.</p>
+        <p className="muted">Nothing published matches that filter yet.</p>
       ) : (
-        <ul>
+        <div className="browse-grid">
           {items.map((exp) => (
-            <li key={exp.id} style={{ marginBottom: "0.75rem" }}>
-              <strong>
+            <div key={exp.id} className="card card-pad-sm browse-card">
+              <div className="card-kicker">{levelLine(exp)}</div>
+              <div className="card-title">
                 {exp.company} — {exp.roleTitle}
-              </strong>{" "}
-              {exp.level && <span>({exp.level})</span>} — ₹{(exp.pricePaise / 100).toFixed(2)}
-              <br />
-              <span>{exp.teaser}</span>
-              <br />
-              <button type="button" onClick={() => onSelect(exp.id)}>
-                View
-              </button>
-            </li>
+              </div>
+              <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 14, lineHeight: 1.5 }}>
+                {exp.teaser}
+              </p>
+              <div className="row" style={{ gap: 8 }}>
+                <OutcomeTag outcome={exp.outcome} />
+                {exp.isRemote && <RemoteTag />}
+              </div>
+              <div className="browse-card-footer">
+                <span className="price-tag">₹{(exp.pricePaise / 100).toFixed(2)}</span>
+                <button type="button" onClick={() => onSelect(exp.id)} className="btn btn-outline btn-outline-accent">
+                  View
+                  <ArrowRightIcon />
+                </button>
+              </div>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );

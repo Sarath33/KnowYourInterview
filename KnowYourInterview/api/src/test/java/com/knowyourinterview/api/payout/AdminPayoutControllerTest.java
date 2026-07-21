@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -38,6 +39,10 @@ class AdminPayoutControllerTest {
 
     @MockitoBean
     private PayoutService payoutService;
+
+    // SecurityConfig now wires RateLimitingFilter, which needs this bean to exist.
+    @MockitoBean
+    private StringRedisTemplate redisTemplate;
 
     private String tokenFor(boolean admin) {
         return "Bearer " + jwtService.issueAccessToken(UUID.randomUUID(), "user@example.com", admin).token();

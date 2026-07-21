@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -16,14 +17,18 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import jakarta.servlet.http.HttpServletResponse;
+
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
     private final JwtService jwtService;
+    private final StringRedisTemplate redisTemplate;
 
-    public SecurityConfig(JwtService jwtService) {
+    public SecurityConfig(JwtService jwtService, StringRedisTemplate redisTemplate) {
         this.jwtService = jwtService;
+        this.redisTemplate = redisTemplate;
     }
 
     @Bean
@@ -64,9 +69,23 @@ public class SecurityConfig {
                 // cookie-based auth) doesn't apply here.
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // No formLogin/httpBasic is configured (stateless JWT API), so Spring
+                // Security has no default AuthenticationEntryPoint and falls back to
+                // Http403ForbiddenEntryPoint — every unauthenticated request would come
+                // back 403 instead of 401. This restores the expected 401.
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint((request, response, authException) ->
+                                response.sendError(HttpServletResponse.SC_UNAUTHORIZED)))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/v1/health").permitAll()
                         .requestMatchers("/api/v1/auth/**").permitAll()
+                        // Actuator only ever exposes health+info over HTTP (see
+                        // application.yml's management.endpoints.web.exposure.include) —
+                        // nothing more sensitive is reachable under /actuator/**, so a
+                        // blanket permitAll here is safe. Health's own show-details:
+                        // when-authorized setting (not this rule) is what hides
+                        // DB/Redis component detail from non-admins.
+                        .requestMatchers("/actuator/**").permitAll()
                         // Razorpay calls this server-to-server with no JWT — the
                         // X-Razorpay-Signature check inside WebhookController is the real
                         // authentication here, not Spring Security.
@@ -81,7 +100,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/experiences", "/api/v1/experiences/*").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
-                .addFilterBefore(new JwtAuthenticationFilter(jwtService), UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(new JwtAuthenticationFilter(jwtService), UsernamePasswordAuthenticationFilter.class)
+                // Anchored to JwtAuthenticationFilter specifically (not the
+                // UsernamePasswordAuthenticationFilter anchor above) so it's guaranteed to
+                // run strictly before it — rejecting a rate-limited request before bothering
+                // to parse its JWT.
+                .addFilterBefore(new RateLimitingFilter(redisTemplate), JwtAuthenticationFilter.class);
 
         return http.build();
     }

@@ -49,6 +49,15 @@ public class LocalProofStorageService implements ProofStorageService {
         }
     }
 
+    @Override
+    public void delete(String storageKey) {
+        try {
+            Files.deleteIfExists(resolve(storageKey));
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to delete proof document: " + storageKey, e);
+        }
+    }
+
     private Path resolve(String storageKey) {
         Path resolved = rootDir.resolve(storageKey).normalize();
         if (!resolved.startsWith(rootDir)) {

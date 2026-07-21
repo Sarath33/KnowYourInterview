@@ -152,8 +152,11 @@ public class Experience {
         this.updatedAt = Instant.now();
     }
 
+    /** Also used to resubmit a REJECTED draft — clears the stale rejection reason so a
+     * fresh admin review isn't shown last time's verdict. */
     public void markPendingReview() {
         this.status = ExperienceStatus.PENDING_REVIEW;
+        this.rejectionReason = null;
         this.updatedAt = Instant.now();
     }
 
@@ -167,6 +170,16 @@ public class Experience {
     public void reject(String reason) {
         this.status = ExperienceStatus.REJECTED;
         this.rejectionReason = reason;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Pulls a live listing back to DRAFT so it can be edited and resubmitted through
+     * review again. Existing purchasers keep full access regardless — see
+     * ExperienceService#getPublicView, which grants access on entitlement/ownership
+     * independent of current status. */
+    public void unpublish() {
+        this.status = ExperienceStatus.DRAFT;
+        this.publishedAt = null;
         this.updatedAt = Instant.now();
     }
 

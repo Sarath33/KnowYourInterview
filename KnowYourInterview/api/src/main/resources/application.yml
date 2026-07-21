@@ -38,6 +38,29 @@ logging:
   level:
     com.knowyourinterview: INFO
 
+management:
+  endpoints:
+    web:
+      # Only health + info reachable over HTTP — nothing else (env, beans, threaddump,
+      # etc.) is exposed, so SecurityConfig only needs one permitAll rule for this.
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+      # "ADMIN" here matches the ROLE_ADMIN granted authority JwtAuthenticationFilter
+      # already sets for admin users — same role used by SecurityConfig's
+      # hasRole("ADMIN") rules elsewhere. Non-admins (and the unauthenticated
+      # liveness/readiness probes below) just get {"status":"UP"}, no component detail.
+      roles: ADMIN
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
 app:
   jwt:
     # Local-dev-only default. Override with the JWT_SECRET env var for any shared/deployed environment —
@@ -66,3 +89,13 @@ app:
     key-id: ${RAZORPAY_KEY_ID:}
     key-secret: ${RAZORPAY_KEY_SECRET:}
     webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+
+# Error tracking (sentry.io). Blank DSN = the Sentry Spring Boot starter quietly
+# no-ops (no crashes, no events sent) — same pattern as the Razorpay keys above. Create
+# a free Sentry project and set SENTRY_DSN when you're ready to use this.
+sentry:
+  dsn: ${SENTRY_DSN:}
+  environment: ${SENTRY_ENVIRONMENT:local}
+  # Performance tracing is separate from error reporting and samples/costs differently —
+  # off by default. Set SENTRY_TRACES_SAMPLE_RATE (0.0-1.0) once you want it.
+  traces-sample-rate: ${SENTRY_TRACES_SAMPLE_RATE:0.0}
