@@ -83,7 +83,8 @@ class PurchaseControllerTest {
         UUID purchaseId = UUID.randomUUID();
         when(purchaseService.confirmPayment(eq(userId), any()))
                 .thenReturn(new PurchaseResponse(
-                        purchaseId, experienceId, 9900, Purchase.Status.PAID, java.time.Instant.now()));
+                        purchaseId, experienceId, "Acme", "Backend Engineer", "L4", 9900, Purchase.Status.PAID,
+                        java.time.Instant.now()));
 
         mockMvc.perform(post("/api/v1/purchases/confirm")
                         .header("Authorization", bearerTokenFor(userId))
@@ -115,7 +116,8 @@ class PurchaseControllerTest {
     void mineReturnsListWhenAuthenticated() throws Exception {
         UUID userId = UUID.randomUUID();
         when(purchaseService.listMine(userId)).thenReturn(List.of(new PurchaseResponse(
-                UUID.randomUUID(), UUID.randomUUID(), 9900, Purchase.Status.PAID, java.time.Instant.now())));
+                UUID.randomUUID(), UUID.randomUUID(), "Acme", "Backend Engineer", "L4", 9900, Purchase.Status.PAID,
+                java.time.Instant.now())));
 
         mockMvc.perform(get("/api/v1/purchases/mine").header("Authorization", bearerTokenFor(userId)))
                 .andExpect(status().isOk())

@@ -49,7 +49,13 @@ export interface ExperienceTeaser {
   outcome: ExperienceOutcome;
   teaser: string;
   pricePaise: number;
+  /** Safe to show pre-purchase — signals content depth without leaking round content. */
+  roundCount: number;
   publishedAt?: ISODateTime;
+  /** True if the current viewer already holds a paid entitlement for this experience.
+   * Always false for a guest (no token sent). On ExperienceFull (which extends this) it's
+   * always true — reaching a full response at all implies access. */
+  unlocked: boolean;
 }
 
 export interface ExperienceFull extends ExperienceTeaser {
@@ -60,6 +66,9 @@ export interface ExperienceFull extends ExperienceTeaser {
   timeline?: string;
   compensation?: string;
   rejectionReason?: string;
+  /** How many people hold a real (paid) entitlement — visible to the owner, an admin, or
+   * a purchaser (same audience as everything else on this type). Not on the public teaser. */
+  unlockCount: number;
   rounds: ExperienceRound[];
   proofDocuments: ProofDocument[];
 }
@@ -118,9 +127,14 @@ export interface ProofDocument {
 
 export type PurchaseStatus = "CREATED" | "PAID" | "FAILED";
 
+/** company/roleTitle/level ride along so My Library can show what was actually bought
+ * instead of just a price and a date. level is optional — Experience.level itself is. */
 export interface Purchase {
   id: UUID;
   experienceId: UUID;
+  company: string;
+  roleTitle: string;
+  level?: string;
   amountPaise: number;
   status: PurchaseStatus;
   createdAt: ISODateTime;

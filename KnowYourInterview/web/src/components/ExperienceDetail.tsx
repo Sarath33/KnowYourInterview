@@ -5,6 +5,7 @@ import { loadRazorpayCheckout } from "../lib/razorpay";
 import { useAuth } from "../context/AuthContext";
 import { OutcomeTag, RemoteTag } from "./tags";
 import { ArrowLeftIcon, LockIcon } from "./icons";
+import { interviewedLabel, roundCountLabel } from "../lib/format";
 
 function levelLine(exp: { level?: string; location?: string }): string {
   return [exp.level, exp.location].filter(Boolean).join(" · ") || "—";
@@ -13,9 +14,11 @@ function levelLine(exp: { level?: string; location?: string }): string {
 export function ExperienceDetail({
   experienceId,
   onClose,
+  onLoginRequired,
 }: {
   experienceId: string;
   onClose: () => void;
+  onLoginRequired: () => void;
 }) {
   const { accessToken, isAuthenticated, user } = useAuth();
   const [view, setView] = useState<ExperienceView | null>(null);
@@ -132,6 +135,7 @@ export function ExperienceDetail({
           isAuthenticated={isAuthenticated}
           purchasing={purchasing}
           onUnlock={unlock}
+          onLoginRequired={onLoginRequired}
         />
       )}
       {view && view.entitled && (
@@ -146,12 +150,15 @@ function TeaserWithUnlock({
   isAuthenticated,
   purchasing,
   onUnlock,
+  onLoginRequired,
 }: {
   teaser: ExperienceTeaser;
   isAuthenticated: boolean;
   purchasing: boolean;
   onUnlock: () => void;
+  onLoginRequired: () => void;
 }) {
+  const recency = interviewedLabel(teaser.interviewMonth, teaser.interviewYear);
   return (
     <div className="card card-pad-lg" style={{ maxWidth: 640, margin: "0 auto" }}>
       <div className="card-kicker" style={{ marginBottom: 6 }}>
@@ -160,10 +167,14 @@ function TeaserWithUnlock({
       <h1 className="page-title" style={{ marginBottom: 14 }}>
         {teaser.company} — {teaser.roleTitle}
       </h1>
-      <div className="row" style={{ gap: 8, marginBottom: 18 }}>
+      <div className="row" style={{ gap: 8, marginBottom: 10 }}>
         <OutcomeTag outcome={teaser.outcome} />
         {teaser.isRemote && <RemoteTag />}
+        <span className="tag tag-neutral">{roundCountLabel(teaser.roundCount)}</span>
       </div>
+      {recency && (
+        <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8 }}>{recency}</div>
+      )}
       <p style={{ color: "var(--text-secondary)", fontSize: 15, lineHeight: 1.6 }}>{teaser.teaser}</p>
       <div className="divider" />
       <p style={{ fontSize: 15, color: "var(--text-secondary-2)", lineHeight: 1.6 }}>
@@ -184,7 +195,13 @@ function TeaserWithUnlock({
         </button>
       ) : (
         <p style={{ marginTop: 8 }}>
-          <a href="#" onClick={(e) => e.preventDefault()}>
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              onLoginRequired();
+            }}
+          >
             Log in
           </a>{" "}
           to unlock this experience.
@@ -208,6 +225,7 @@ function FullExperience({
   const hasStats = full.timeline || full.compensation || full.overallDifficulty;
   const canUnpublish =
     full.status === "PUBLISHED" && !!user && (user.id === full.contributorId || user.isAdmin);
+  const recency = interviewedLabel(full.interviewMonth, full.interviewYear);
   return (
     <div className="card card-pad-lg" style={{ maxWidth: 720, margin: "0 auto" }}>
       <div className="card-kicker" style={{ marginBottom: 6 }}>
@@ -216,10 +234,18 @@ function FullExperience({
       <h1 className="page-title" style={{ marginBottom: 14 }}>
         {full.company} — {full.roleTitle}
       </h1>
-      <div className="row" style={{ gap: 8, marginBottom: 24 }}>
+      <div className="row" style={{ gap: 8, marginBottom: recency ? 8 : 24 }}>
         <OutcomeTag outcome={full.outcome} />
         {full.isRemote && <RemoteTag />}
       </div>
+      {(recency || full.publishedAt) && (
+        <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 24 }}>
+          {recency}
+          {recency && full.publishedAt && " · "}
+          {full.publishedAt &&
+            `Unlocked by ${full.unlockCount} ${full.unlockCount === 1 ? "person" : "people"}`}
+        </div>
+      )}
 
       {canUnpublish && (
         <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 20 }}>

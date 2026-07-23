@@ -257,12 +257,41 @@ class PurchaseServiceTest {
     @Test
     void listMineReturnsUsersPurchasesOnly() {
         UUID userId = UUID.randomUUID();
-        Purchase purchase = new Purchase(UUID.randomUUID(), userId, UUID.randomUUID(), 19900, "order_1");
+        UUID experienceId = UUID.randomUUID();
+        Experience experience = new Experience(
+                experienceId, UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Bengaluru",
+                true, (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser", "advice",
+                (short) 3, "3 weeks", "35 LPA", 19900);
+        Purchase purchase = new Purchase(UUID.randomUUID(), userId, experienceId, 19900, "order_1");
         when(purchaseRepository.findByUserIdOrderByCreatedAtDesc(userId)).thenReturn(List.of(purchase));
+        when(experienceRepository.findAllById(List.of(experienceId))).thenReturn(List.of(experience));
 
         List<PurchaseResponse> mine = service.listMine(userId);
 
         assertThat(mine).hasSize(1);
         assertThat(mine.get(0).amountPaise()).isEqualTo(19900);
+        // company/roleTitle/level ride along so My Library can show what was bought,
+        // not just a price and a date.
+        assertThat(mine.get(0).company()).isEqualTo("Acme");
+        assertThat(mine.get(0).roleTitle()).isEqualTo("Backend Engineer");
+        assertThat(mine.get(0).level()).isEqualTo("L4");
+    }
+
+    @Test
+    void listMineFallsBackToUnknownWhenTheExperienceCantBeFound() {
+        // Shouldn't happen in practice — deleteExperience refuses to delete anything with
+        // a purchase on record — but listMine shouldn't 500 if that invariant is ever
+        // violated; it should degrade gracefully instead.
+        UUID userId = UUID.randomUUID();
+        UUID experienceId = UUID.randomUUID();
+        Purchase purchase = new Purchase(UUID.randomUUID(), userId, experienceId, 19900, "order_1");
+        when(purchaseRepository.findByUserIdOrderByCreatedAtDesc(userId)).thenReturn(List.of(purchase));
+        when(experienceRepository.findAllById(List.of(experienceId))).thenReturn(List.of());
+
+        List<PurchaseResponse> mine = service.listMine(userId);
+
+        assertThat(mine.get(0).company()).isEqualTo("Unknown");
+        assertThat(mine.get(0).roleTitle()).isEqualTo("Unknown");
+        assertThat(mine.get(0).level()).isNull();
     }
 }

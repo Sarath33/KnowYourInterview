@@ -37,16 +37,20 @@ const teaser: ExperienceTeaser = {
   outcome: "OFFER",
   teaser: "Went well overall, three rounds.",
   pricePaise: 19900,
+  roundCount: 1,
+  unlocked: false,
 };
 
 const fullExperience: ExperienceFull = {
   ...teaser,
+  unlocked: true,
   contributorId: "contributor-1",
   status: "PUBLISHED",
   prepAdvice: "Practice system design.",
   timeline: "3 weeks",
   compensation: "35 LPA",
   overallDifficulty: 3,
+  unlockCount: 2,
   rounds: [
     {
       id: "round-1",
@@ -77,7 +81,7 @@ describe("ExperienceDetail", () => {
     const view: ExperienceView = { entitled: false, teaser };
     mockedApi.getExperience.mockResolvedValue(view);
 
-    render(<ExperienceDetail experienceId="exp-1" onClose={vi.fn()} />);
+    render(<ExperienceDetail experienceId="exp-1" onClose={vi.fn()} onLoginRequired={vi.fn()} />);
 
     expect(await screen.findByText("Acme — Backend Engineer")).toBeInTheDocument();
     expect(screen.getByText("Went well overall, three rounds.")).toBeInTheDocument();
@@ -88,12 +92,19 @@ describe("ExperienceDetail", () => {
     stubAuth({ isAuthenticated: false, accessToken: null });
     const view: ExperienceView = { entitled: false, teaser };
     mockedApi.getExperience.mockResolvedValue(view);
+    const onLoginRequired = vi.fn();
 
-    render(<ExperienceDetail experienceId="exp-1" onClose={vi.fn()} />);
+    render(<ExperienceDetail experienceId="exp-1" onClose={vi.fn()} onLoginRequired={onLoginRequired} />);
 
     await screen.findByText("Acme — Backend Engineer");
     expect(screen.queryByRole("button", { name: /Unlock/ })).not.toBeInTheDocument();
     expect(screen.getByText(/to unlock this experience/)).toBeInTheDocument();
+
+    // The "Log in" link should actually navigate to the auth screen, not just sit
+    // there as a dead href="#" (the bug this test now guards against).
+    const clickUser = userEvent.setup();
+    await clickUser.click(screen.getByRole("link", { name: "Log in" }));
+    expect(onLoginRequired).toHaveBeenCalledTimes(1);
   });
 
   it("renders full round detail once the viewer is entitled", async () => {
@@ -101,7 +112,7 @@ describe("ExperienceDetail", () => {
     const view: ExperienceView = { entitled: true, full: fullExperience };
     mockedApi.getExperience.mockResolvedValue(view);
 
-    render(<ExperienceDetail experienceId="exp-1" onClose={vi.fn()} />);
+    render(<ExperienceDetail experienceId="exp-1" onClose={vi.fn()} onLoginRequired={vi.fn()} />);
 
     expect(await screen.findByText("Round 1 — ONSITE")).toBeInTheDocument();
     expect(screen.getByText(/Reverse a linked list/)).toBeInTheDocument();
@@ -132,7 +143,7 @@ describe("ExperienceDetail", () => {
     (window as unknown as { Razorpay: unknown }).Razorpay = razorpayCtor;
 
     const clickUser = userEvent.setup();
-    render(<ExperienceDetail experienceId="exp-1" onClose={vi.fn()} />);
+    render(<ExperienceDetail experienceId="exp-1" onClose={vi.fn()} onLoginRequired={vi.fn()} />);
 
     const unlockButton = await screen.findByRole("button", { name: /Unlock ₹199\.00/ });
     await clickUser.click(unlockButton);

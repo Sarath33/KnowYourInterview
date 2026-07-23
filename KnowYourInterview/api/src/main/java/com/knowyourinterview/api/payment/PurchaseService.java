@@ -1,7 +1,9 @@
 package com.knowyourinterview.api.payment;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -94,7 +96,7 @@ public class PurchaseService {
 
         if (purchase.getStatus() == Purchase.Status.PAID) {
             // Idempotent: the webhook backup may have already confirmed this order.
-            return PurchaseResponse.from(purchase);
+            return PurchaseResponse.from(purchase, experienceRepository.findById(purchase.getExperienceId()).orElse(null));
         }
 
         boolean valid;
@@ -115,7 +117,7 @@ public class PurchaseService {
         }
 
         grantEntitlement(purchase, req.razorpayPaymentId());
-        return PurchaseResponse.from(purchase);
+        return PurchaseResponse.from(purchase, experienceRepository.findById(purchase.getExperienceId()).orElse(null));
     }
 
     /**
@@ -146,8 +148,13 @@ public class PurchaseService {
 
     @Transactional(readOnly = true)
     public List<PurchaseResponse> listMine(UUID userId) {
-        return purchaseRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
-                .map(PurchaseResponse::from)
+        List<Purchase> purchases = purchaseRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        Map<UUID, Experience> experiencesById = experienceRepository
+                .findAllById(purchases.stream().map(Purchase::getExperienceId).distinct().toList())
+                .stream()
+                .collect(Collectors.toMap(Experience::getId, e -> e));
+        return purchases.stream()
+                .map(p -> PurchaseResponse.from(p, experiencesById.get(p.getExperienceId())))
                 .toList();
     }
 

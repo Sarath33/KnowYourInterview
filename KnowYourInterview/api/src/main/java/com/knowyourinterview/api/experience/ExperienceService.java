@@ -1,12 +1,17 @@
 package com.knowyourinterview.api.experience;
 
 import java.io.InputStream;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -32,6 +37,8 @@ public class ExperienceService {
     private final ProofDocumentRepository proofDocumentRepository;
     private final ProofStorageService proofStorageService;
     private final EntitlementRepository entitlementRepository;
+    private final ReviewLogRepository reviewLogRepository;
+    private final PayoutRepository payoutRepository;
     private final int defaultPricePaise;
 
     public ExperienceService(
@@ -40,12 +47,16 @@ public class ExperienceService {
             ProofDocumentRepository proofDocumentRepository,
             ProofStorageService proofStorageService,
             EntitlementRepository entitlementRepository,
+            ReviewLogRepository reviewLogRepository,
+            PayoutRepository payoutRepository,
             @Value("${app.pricing.default-price-paise}") int defaultPricePaise) {
         this.experienceRepository = experienceRepository;
         this.roundRepository = roundRepository;
         this.proofDocumentRepository = proofDocumentRepository;
         this.proofStorageService = proofStorageService;
         this.entitlementRepository = entitlementRepository;
+        this.reviewLogRepository = reviewLogRepository;
+        this.payoutRepository = payoutRepository;
         this.defaultPricePaise = defaultPricePaise;
     }
 
@@ -62,7 +73,7 @@ public class ExperienceService {
     @Transactional
     public ExperienceFullResponse updateDraft(UUID contributorId, UUID experienceId, ExperienceRequest req) {
         Experience experience = getOwned(contributorId, experienceId);
-        requireEditable(experience, "Only a draft or rejected experience can be edited");
+        requireContentEditable(experience, "A published experience can't be edited directly — unpublish it first");
         experience.applyEdits(
                 req.company(), req.roleTitle(), req.level(), req.location(), req.isRemote(), req.interviewMonth(),
                 req.interviewYear(), req.outcome(), req.teaser(), req.prepAdvice(), req.overallDifficulty(),
@@ -74,7 +85,7 @@ public class ExperienceService {
     @Transactional
     public ExperienceRoundResponse addRound(UUID contributorId, UUID experienceId, RoundRequest req) {
         Experience experience = getOwned(contributorId, experienceId);
-        requireEditable(experience, "Rounds can only be added to a draft or rejected experience");
+        requireContentEditable(experience, "Rounds can't be added to a published experience — unpublish it first");
         short nextNumber = (short) (roundRepository.countByExperienceId(experienceId) + 1);
         ExperienceRound round = new ExperienceRound(
                 UUID.randomUUID(), experienceId, nextNumber, req.roundType(), req.durationMinutes(),
@@ -84,10 +95,26 @@ public class ExperienceService {
         return ExperienceRoundResponse.from(round);
     }
 
+    /** Edits an existing round's content in place — same requireContentEditable window as
+     * addRound, but without a remove-then-re-add round trip. roundNumber, id, and
+     * experienceId are untouched; only the descriptive fields change. */
+    @Transactional
+    public ExperienceRoundResponse updateRound(UUID contributorId, UUID experienceId, UUID roundId, RoundRequest req) {
+        Experience experience = getOwned(contributorId, experienceId);
+        requireContentEditable(experience, "Rounds can't be edited on a published experience — unpublish it first");
+        ExperienceRound round = roundRepository.findByIdAndExperienceId(roundId, experienceId)
+                .orElseThrow(() -> new NotFoundException("Round not found"));
+        round.applyEdits(
+                req.roundType(), req.durationMinutes(), req.questionsAsked(), joinTags(req.topicsTags()),
+                req.approach(), req.interviewerBehavior(), req.difficulty());
+        roundRepository.save(round);
+        return ExperienceRoundResponse.from(round);
+    }
+
     @Transactional
     public void deleteRound(UUID contributorId, UUID experienceId, UUID roundId) {
         Experience experience = getOwned(contributorId, experienceId);
-        requireEditable(experience, "Rounds can only be removed from a draft or rejected experience");
+        requireContentEditable(experience, "Rounds can't be removed from a published experience — unpublish it first");
         roundRepository.deleteByIdAndExperienceId(roundId, experienceId);
     }
 
@@ -96,24 +123,45 @@ public class ExperienceService {
     @Transactional
     public void deleteProof(UUID contributorId, UUID experienceId, UUID proofId) {
         Experience experience = getOwned(contributorId, experienceId);
-        requireEditable(experience, "Proof documents can only be removed from a draft or rejected experience");
+        requireContentEditable(experience, "Proof documents can't be removed from a published experience — unpublish it first");
         ProofDocument doc = proofDocumentRepository.findByIdAndExperienceId(proofId, experienceId)
                 .orElseThrow(() -> new NotFoundException("Proof document not found"));
         proofDocumentRepository.delete(doc);
         proofStorageService.delete(doc.getStorageKey());
     }
 
-    /** Owner-only, editable-only. Deletes the experience along with its rounds and proof
-     * documents (DB rows and stored files) — a rejected submission the contributor
-     * doesn't want to fix, or a draft they abandoned. */
+    /** Owner-only, DRAFT-or-REJECTED only (narrower than the content-editable window —
+     * withdrawing a submission entirely while an admin may be actively reviewing it is a
+     * bigger action than editing its content, so PENDING_REVIEW is deliberately excluded
+     * here even though it's now editable). Deletes the experience along with its rounds,
+     * proof documents (DB rows and stored files), and review-log history — a rejected
+     * submission the contributor doesn't want to fix, or a draft they abandoned.
+     *
+     * Two extra guards beyond the status check: a DRAFT can also mean "this was
+     * PUBLISHED and got unpublished for an edit" (see unpublish()), so it can carry real
+     * purchase/entitlement/payout history even though its current status looks like a
+     * never-submitted draft. Deleting that would either corrupt a paying viewer's access
+     * or silently drop money owed to the contributor, and either row existing blocks the
+     * delete at the database level anyway (their foreign keys aren't cascading, by
+     * design — this isn't data anyone should lose to a cascade). Both checks turn that
+     * into a clear error instead of a raw constraint-violation failure. */
     @Transactional
     public void deleteExperience(UUID contributorId, UUID experienceId) {
         Experience experience = getOwned(contributorId, experienceId);
-        requireEditable(experience, "Only a draft or rejected experience can be deleted");
+        requireDraftOrRejected(experience, "Only a draft or rejected experience can be deleted");
+        if (entitlementRepository.existsByExperienceId(experienceId)) {
+            throw new InvalidStateException(
+                    "This experience has been purchased and can't be deleted — unpublish it if you need to fix something, don't delete it");
+        }
+        if (payoutRepository.existsByExperienceId(experienceId)) {
+            throw new InvalidStateException(
+                    "This experience has a payout on record and can't be deleted");
+        }
         List<ProofDocument> proofDocs = proofDocumentRepository.findByExperienceId(experienceId);
         proofDocs.forEach(doc -> proofStorageService.delete(doc.getStorageKey()));
         proofDocumentRepository.deleteAll(proofDocs);
         roundRepository.deleteByExperienceId(experienceId);
+        reviewLogRepository.deleteByExperienceId(experienceId);
         experienceRepository.delete(experience);
     }
 
@@ -142,7 +190,7 @@ public class ExperienceService {
     @Transactional
     public ProofDocumentResponse uploadProof(UUID contributorId, UUID experienceId, MultipartFile file) {
         Experience experience = getOwned(contributorId, experienceId);
-        requireEditable(experience, "Proof can only be uploaded while the experience is a draft or rejected");
+        requireContentEditable(experience, "Proof can't be uploaded to a published experience — unpublish it first");
         if (file.isEmpty()) {
             throw new InvalidStateException("Uploaded file is empty");
         }
@@ -164,7 +212,7 @@ public class ExperienceService {
     @Transactional
     public ExperienceFullResponse submitForReview(UUID contributorId, UUID experienceId) {
         Experience experience = getOwned(contributorId, experienceId);
-        requireEditable(experience, "Only a draft or rejected experience can be submitted for review");
+        requireDraftOrRejected(experience, "Only a draft or rejected experience can be submitted for review");
 
         if (roundRepository.countByExperienceId(experienceId) == 0) {
             throw new InvalidStateException("Add at least one interview round before submitting");
@@ -192,11 +240,27 @@ public class ExperienceService {
 
     @Transactional(readOnly = true)
     public PagedResponse<ExperienceTeaserResponse> browsePublished(
-            String company, String roleTitle, String level, Short year, int page, int size) {
+            UUID viewerId, String company, String roleTitle, String level, Short year, String search, String sort,
+            int page, int size) {
         Page<Experience> result = experienceRepository.browsePublished(
-                blankToNull(company), blankToNull(roleTitle), blankToNull(level), year,
-                PageRequest.of(page, Math.min(size, 100)));
-        return PagedResponse.of(result.map(ExperienceTeaserResponse::from));
+                blankToNull(company), blankToNull(roleTitle), blankToNull(level), year, searchPattern(search),
+                PageRequest.of(page, Math.min(size, 100), resolveSort(sort)));
+        List<UUID> ids = result.getContent().stream().map(Experience::getId).toList();
+        // An empty IN (...) list is invalid JPQL for most providers — skip the query(ies)
+        // entirely for an empty page instead of sending a zero-length list.
+        Map<UUID, Long> roundCounts = ids.isEmpty()
+                ? Map.of()
+                : roundRepository.countByExperienceIdIn(ids).stream()
+                        .collect(Collectors.toMap(
+                                ExperienceRoundRepository.ExperienceRoundCount::getExperienceId,
+                                ExperienceRoundRepository.ExperienceRoundCount::getRoundCount));
+        // A guest (viewerId == null) has nothing unlocked by definition — skip the query.
+        Set<UUID> unlockedIds = (viewerId == null || ids.isEmpty())
+                ? Set.of()
+                : new HashSet<>(entitlementRepository.findExperienceIdsByUserIdAndExperienceIdIn(viewerId, ids));
+        return PagedResponse.of(
+                result.map(e -> ExperienceTeaserResponse.from(
+                        e, roundCounts.getOrDefault(e.getId(), 0L), unlockedIds.contains(e.getId()))));
     }
 
     /**
@@ -231,7 +295,10 @@ public class ExperienceService {
         if (isOwner || viewerIsAdmin || hasPurchased) {
             return ExperienceViewResponse.fullAccess(toFullResponse(experience));
         }
-        return ExperienceViewResponse.teaserOnly(ExperienceTeaserResponse.from(experience));
+        // Reaching this branch means hasPurchased was false (otherwise we'd be in the
+        // fullAccess branch above), so unlocked is always false here.
+        return ExperienceViewResponse.teaserOnly(
+                ExperienceTeaserResponse.from(experience, roundRepository.countByExperienceId(experienceId), false));
     }
 
     public record ProofDownload(ProofDocument document, InputStream content) {}
@@ -258,13 +325,28 @@ public class ExperienceService {
         return experience;
     }
 
-    /** "Editable" = DRAFT (never submitted yet) or REJECTED (an admin sent it back with a
-     * reason). Both are states the contributor fully controls: add/remove rounds,
-     * upload/delete proof, edit fields, delete the whole thing, or submit for review.
-     * PENDING_REVIEW and PUBLISHED are deliberately not editable — a submission mid-review
-     * shouldn't shift under the admin looking at it, and a published listing has to go
-     * through unpublish() first. */
-    private void requireEditable(Experience experience, String message) {
+    /** Content (fields, rounds, proof documents) can be edited any time before an
+     * experience is either live or fully withdrawn: DRAFT (never submitted), PENDING_REVIEW
+     * (submitted, awaiting a verdict — a contributor spotting a typo or wanting to add
+     * detail shouldn't have to wait for a rejection first), or REJECTED (sent back with a
+     * reason). Only PUBLISHED is locked out — a live listing has to go through
+     * unpublish() first, which is a bigger, more deliberate action than a content edit. */
+    private void requireContentEditable(Experience experience, String message) {
+        ExperienceStatus status = experience.getStatus();
+        boolean editable = status == ExperienceStatus.DRAFT
+                || status == ExperienceStatus.PENDING_REVIEW
+                || status == ExperienceStatus.REJECTED;
+        if (!editable) {
+            throw new InvalidStateException(message);
+        }
+    }
+
+    /** Narrower than requireContentEditable — DRAFT or REJECTED only, for the two actions
+     * that don't make sense mid-review: submitForReview (there's nothing to (re)submit
+     * while already PENDING_REVIEW) and deleteExperience (withdrawing a submission
+     * entirely while an admin may be actively looking at it is a bigger action than
+     * editing its content, so it's kept out of scope for PENDING_REVIEW). */
+    private void requireDraftOrRejected(Experience experience, String message) {
         ExperienceStatus status = experience.getStatus();
         if (status != ExperienceStatus.DRAFT && status != ExperienceStatus.REJECTED) {
             throw new InvalidStateException(message);
@@ -280,7 +362,8 @@ public class ExperienceService {
                 .findByExperienceId(experience.getId()).stream()
                 .map(ProofDocumentResponse::from)
                 .toList();
-        return ExperienceFullResponse.from(experience, rounds, proof);
+        long unlockCount = entitlementRepository.countByExperienceId(experience.getId());
+        return ExperienceFullResponse.from(experience, rounds, proof, unlockCount);
     }
 
     private static String joinTags(List<String> tags) {
@@ -289,5 +372,25 @@ public class ExperienceService {
 
     private static String blankToNull(String s) {
         return (s == null || s.isBlank()) ? null : s;
+    }
+
+    /** Builds the LIKE pattern the repository query expects, or null for "no search" —
+     * wildcards and lowercasing happen here so the JPQL only has to do a plain LIKE. */
+    private static String searchPattern(String search) {
+        String trimmed = blankToNull(search);
+        return trimmed == null ? null : "%" + trimmed.toLowerCase() + "%";
+    }
+
+    /** "newest" (default/unrecognized value) sorts by publishedAt descending; the other
+     * two sort by price. Falling back silently on an unrecognized value rather than
+     * throwing keeps a stale/bookmarked "sort=" query param from breaking the page. */
+    private static Sort resolveSort(String sort) {
+        if ("priceLow".equals(sort)) {
+            return Sort.by(Sort.Direction.ASC, "pricePaise");
+        }
+        if ("priceHigh".equals(sort)) {
+            return Sort.by(Sort.Direction.DESC, "pricePaise");
+        }
+        return Sort.by(Sort.Direction.DESC, "publishedAt");
     }
 }

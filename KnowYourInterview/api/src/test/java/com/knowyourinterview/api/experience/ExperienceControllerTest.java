@@ -54,7 +54,7 @@ class ExperienceControllerTest {
         return new ExperienceFullResponse(
                 UUID.randomUUID(), contributorId, "Acme", "Backend Engineer", "L4", "Remote", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop, focus on systems design.",
-                9900, null, ExperienceStatus.DRAFT, null, null, null, null, null, List.of(), List.of());
+                9900, 0, null, ExperienceStatus.DRAFT, null, null, null, null, null, 0, List.of(), List.of(), true);
     }
 
     @Test
@@ -96,8 +96,10 @@ class ExperienceControllerTest {
     void browseIsPublic() throws Exception {
         ExperienceTeaserResponse teaser = new ExperienceTeaserResponse(
                 UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Remote", true,
-                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, Instant.now());
-        when(experienceService.browsePublished(any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, 4, Instant.now(), false);
+        when(experienceService.browsePublished(
+                        any(), any(), any(), any(), any(), any(), any(),
+                        org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenReturn(new PagedResponse<>(List.of(teaser), 0, 20, 1, 1));
 
         mockMvc.perform(get("/api/v1/experiences"))
@@ -110,7 +112,7 @@ class ExperienceControllerTest {
         UUID id = UUID.randomUUID();
         ExperienceTeaserResponse teaser = new ExperienceTeaserResponse(
                 id, "Acme", "Backend Engineer", "L4", "Remote", true,
-                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, Instant.now());
+                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, 4, Instant.now(), false);
         when(experienceService.getPublicView(isNull(), eq(false), eq(id)))
                 .thenReturn(ExperienceViewResponse.teaserOnly(teaser));
 

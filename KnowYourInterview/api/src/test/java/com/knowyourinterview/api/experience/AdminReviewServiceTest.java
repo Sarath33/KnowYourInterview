@@ -14,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.knowyourinterview.api.common.InvalidStateException;
 import com.knowyourinterview.api.common.NotFoundException;
 import com.knowyourinterview.api.experience.dto.ExperienceFullResponse;
+import com.knowyourinterview.api.payment.EntitlementRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -43,6 +44,8 @@ class AdminReviewServiceTest {
     private ReviewLogRepository reviewLogRepository;
     @Mock
     private PayoutRepository payoutRepository;
+    @Mock
+    private EntitlementRepository entitlementRepository;
 
     private AdminReviewService service;
 
@@ -50,7 +53,7 @@ class AdminReviewServiceTest {
     void setUp() {
         service = new AdminReviewService(
                 experienceRepository, roundRepository, proofDocumentRepository,
-                reviewLogRepository, payoutRepository, CONTRIBUTOR_PAYOUT_PAISE);
+                reviewLogRepository, payoutRepository, entitlementRepository, CONTRIBUTOR_PAYOUT_PAISE);
     }
 
     private Experience pendingReviewExperience() {

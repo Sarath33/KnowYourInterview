@@ -10,4 +10,6 @@ public interface PayoutRepository extends JpaRepository<Payout, UUID> {
     List<Payout> findByStatusInOrderByCreatedAtAsc(List<Payout.Status> statuses);
 
     List<Payout> findByContributorIdOrderByCreatedAtDesc(UUID contributorId);
+
+    boolean existsByExperienceId(UUID experienceId);
 }

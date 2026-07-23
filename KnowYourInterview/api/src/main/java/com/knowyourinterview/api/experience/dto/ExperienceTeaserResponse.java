@@ -18,12 +18,17 @@ public record ExperienceTeaserResponse(
         ExperienceOutcome outcome,
         String teaser,
         int pricePaise,
-        Instant publishedAt) {
+        // Round count is safe to show pre-purchase — it signals content depth without
+        // leaking any actual round content (type, questions, etc).
+        int roundCount,
+        Instant publishedAt,
+        // False for a guest or for a signed-in viewer who hasn't purchased this one yet.
+        boolean unlocked) {
 
-    public static ExperienceTeaserResponse from(Experience e) {
+    public static ExperienceTeaserResponse from(Experience e, long roundCount, boolean unlocked) {
         return new ExperienceTeaserResponse(
                 e.getId(), e.getCompany(), e.getRoleTitle(), e.getLevel(), e.getLocation(), e.isRemote(),
                 e.getInterviewMonth(), e.getInterviewYear(), e.getOutcome(), e.getTeaser(), e.getPricePaise(),
-                e.getPublishedAt());
+                (int) roundCount, e.getPublishedAt(), unlocked);
     }
 }

@@ -68,6 +68,15 @@ public class ExperienceController {
         return experienceService.addRound(user.id(), id, req);
     }
 
+    @PutMapping("/{id}/rounds/{roundId}")
+    public ExperienceRoundResponse updateRound(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable UUID id,
+            @PathVariable UUID roundId,
+            @Valid @RequestBody RoundRequest req) {
+        return experienceService.updateRound(user.id(), id, roundId, req);
+    }
+
     @DeleteMapping("/{id}/rounds/{roundId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteRound(
@@ -129,13 +138,17 @@ public class ExperienceController {
 
     @GetMapping
     public PagedResponse<ExperienceTeaserResponse> browse(
+            @AuthenticationPrincipal AuthenticatedUser user,
             @RequestParam(required = false) String company,
             @RequestParam(required = false) String roleTitle,
             @RequestParam(required = false) String level,
             @RequestParam(required = false) Short year,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "newest") String sort,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return experienceService.browsePublished(company, roleTitle, level, year, page, size);
+        UUID viewerId = user == null ? null : user.id();
+        return experienceService.browsePublished(viewerId, company, roleTitle, level, year, search, sort, page, size);
     }
 
     @GetMapping("/{id}")

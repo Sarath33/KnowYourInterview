@@ -124,6 +124,7 @@ UPDATE users SET is_admin = true WHERE email = 'you@example.com';
   - All queries go through JPA/JPQL with bound parameters (no string-concatenated SQL anywhere), so standard SQL injection isn't a live concern.
   - Passwords are BCrypt-hashed (`PasswordEncoder` bean in `SecurityConfig`, Phase 2).
   - **One action item for when this deploys**: `corsConfigurationSource()` in `SecurityConfig` currently allows `http://localhost:*` / `http://127.0.0.1:*` only — correct for local dev, but needs updating to the real deployed frontend origin(s) before this is useful anywhere else. There's a comment marking the spot.
+  - **Another action item for when this deploys**: the frontend now uses real History-API routing (`web/src/lib/router.tsx` — every screen is a URL like `/browse/:id`, not just app state), added so the browser's Back/Forward buttons and shared links actually work instead of Back exiting the app entirely. Vite's dev server already serves `index.html` for any unmatched path, so this works out of the box locally. Whatever serves the built `web/dist` in production (Phase 6-8 AWS deploy) needs an SPA-fallback rule — serve `index.html` for any path that isn't a real static asset or an `/api/...` route — or a hard refresh/direct link on anything other than `/` will 404 before React ever loads.
 
 ### Known gaps worth knowing about (Phase 5)
 

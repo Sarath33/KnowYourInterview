@@ -20,6 +20,9 @@ public interface ExperienceRepository extends JpaRepository<Experience, UUID> {
     // ":param IS NULL OR ..." check means it's never evaluated at runtime for a null filter.
     // Without an explicit type, a null parameter arrives with no type info and LOWER() can't
     // resolve an overload for it ("function lower(bytea) does not exist"). The cast fixes that.
+    // searchPattern arrives pre-wrapped with "%...%" wildcards from the service (already
+    // lowercased) rather than built with CONCAT/LOWER here — keeps this query symmetric
+    // with the other filters' null-check style and avoids a CONCAT-inside-CAST mess.
     @Query("""
             SELECT e FROM Experience e
             WHERE e.status = com.knowyourinterview.api.experience.ExperienceStatus.PUBLISHED
@@ -27,11 +30,16 @@ public interface ExperienceRepository extends JpaRepository<Experience, UUID> {
               AND (:roleTitle IS NULL OR LOWER(e.roleTitle) = LOWER(CAST(:roleTitle AS string)))
               AND (:level IS NULL OR LOWER(e.level) = LOWER(CAST(:level AS string)))
               AND (:year IS NULL OR e.interviewYear = :year)
+              AND (:searchPattern IS NULL
+                   OR LOWER(e.company) LIKE CAST(:searchPattern AS string)
+                   OR LOWER(e.roleTitle) LIKE CAST(:searchPattern AS string)
+                   OR LOWER(e.teaser) LIKE CAST(:searchPattern AS string))
             """)
     Page<Experience> browsePublished(
             @Param("company") String company,
             @Param("roleTitle") String roleTitle,
             @Param("level") String level,
             @Param("year") Short year,
+            @Param("searchPattern") String searchPattern,
             Pageable pageable);
 }

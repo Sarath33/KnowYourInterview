@@ -12,6 +12,7 @@ import com.knowyourinterview.api.common.NotFoundException;
 import com.knowyourinterview.api.experience.dto.ExperienceFullResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceRoundResponse;
 import com.knowyourinterview.api.experience.dto.ProofDocumentResponse;
+import com.knowyourinterview.api.payment.EntitlementRepository;
 
 @Service
 public class AdminReviewService {
@@ -21,6 +22,7 @@ public class AdminReviewService {
     private final ProofDocumentRepository proofDocumentRepository;
     private final ReviewLogRepository reviewLogRepository;
     private final PayoutRepository payoutRepository;
+    private final EntitlementRepository entitlementRepository;
     private final int contributorPayoutPaise;
 
     public AdminReviewService(
@@ -29,12 +31,14 @@ public class AdminReviewService {
             ProofDocumentRepository proofDocumentRepository,
             ReviewLogRepository reviewLogRepository,
             PayoutRepository payoutRepository,
+            EntitlementRepository entitlementRepository,
             @Value("${app.pricing.contributor-payout-paise}") int contributorPayoutPaise) {
         this.experienceRepository = experienceRepository;
         this.roundRepository = roundRepository;
         this.proofDocumentRepository = proofDocumentRepository;
         this.reviewLogRepository = reviewLogRepository;
         this.payoutRepository = payoutRepository;
+        this.entitlementRepository = entitlementRepository;
         this.contributorPayoutPaise = contributorPayoutPaise;
     }
 
@@ -102,6 +106,7 @@ public class AdminReviewService {
                 .findByExperienceId(experience.getId()).stream()
                 .map(ProofDocumentResponse::from)
                 .toList();
-        return ExperienceFullResponse.from(experience, rounds, proof);
+        long unlockCount = entitlementRepository.countByExperienceId(experience.getId());
+        return ExperienceFullResponse.from(experience, rounds, proof, unlockCount);
     }
 }

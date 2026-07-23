@@ -111,4 +111,25 @@ public class ExperienceRound {
     public Short getDifficulty() {
         return difficulty;
     }
+
+    /** Edits every field except id/experienceId/roundNumber/createdAt — mirrors
+     * Experience#applyEdits. roundNumber deliberately isn't touched here; reordering
+     * rounds isn't something this supports (remove-and-re-add is still how you'd change
+     * ordering, same as before this existed). */
+    public void applyEdits(
+            String roundType,
+            Short durationMinutes,
+            String questionsAsked,
+            String topicsTags,
+            String approach,
+            String interviewerBehavior,
+            Short difficulty) {
+        this.roundType = roundType;
+        this.durationMinutes = durationMinutes;
+        this.questionsAsked = questionsAsked;
+        this.topicsTags = topicsTags;
+        this.approach = approach;
+        this.interviewerBehavior = interviewerBehavior;
+        this.difficulty = difficulty;
+    }
 }

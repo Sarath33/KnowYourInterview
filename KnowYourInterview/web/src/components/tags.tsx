@@ -10,6 +10,12 @@ export function RemoteTag() {
   return <span className="tag tag-neutral">Remote</span>;
 }
 
+/** Shown on a Browse card when the signed-in viewer already holds a paid entitlement for
+ * that experience — previously an already-unlocked card looked identical to a locked one. */
+export function UnlockedTag() {
+  return <span className="tag tag-success">Unlocked</span>;
+}
+
 const STATUS_LABEL: Record<ExperienceStatus, string> = {
   DRAFT: "Draft",
   PENDING_REVIEW: "Pending review",

@@ -136,6 +136,19 @@ export async function addRound(token: string, id: string, body: RoundRequest): P
   });
 }
 
+export async function updateRound(
+  token: string,
+  id: string,
+  roundId: string,
+  body: RoundRequest,
+): Promise<ExperienceRound> {
+  return request(`/api/v1/experiences/${id}/rounds/${roundId}`, {
+    method: "PUT",
+    headers: authHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
 export async function deleteRound(token: string, id: string, roundId: string): Promise<void> {
   return request(`/api/v1/experiences/${id}/rounds/${roundId}`, {
     method: "DELETE",
@@ -195,20 +208,27 @@ export async function unpublishExperience(token: string, id: string): Promise<Ex
 
 // --- Experiences (public browse) ---
 
-export async function browseExperiences(params: {
-  company?: string;
-  roleTitle?: string;
-  level?: string;
-  year?: number;
-  page?: number;
-  size?: number;
-}): Promise<PagedResponse<ExperienceTeaser>> {
+export async function browseExperiences(
+  params: {
+    company?: string;
+    roleTitle?: string;
+    level?: string;
+    year?: number;
+    search?: string;
+    sort?: "newest" | "priceLow" | "priceHigh";
+    page?: number;
+    size?: number;
+  },
+  // Optional — a signed-in token lets the backend flag which results the viewer has
+  // already unlocked. Guests (no token) get every card back with unlocked: false.
+  token?: string,
+): Promise<PagedResponse<ExperienceTeaser>> {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
     if (v !== undefined && v !== "") query.set(k, String(v));
   });
   const qs = query.toString();
-  return request(`/api/v1/experiences${qs ? `?${qs}` : ""}`);
+  return request(`/api/v1/experiences${qs ? `?${qs}` : ""}`, token ? { headers: authHeaders(token) } : {});
 }
 
 export async function getExperience(id: string, token?: string): Promise<ExperienceView> {
