@@ -73,6 +73,30 @@ export interface ExperienceFull extends ExperienceTeaser {
   proofDocuments: ProofDocument[];
 }
 
+/** A prior version of an experience's top-level fields, captured right before an edit
+ * overwrote them (see GET /experiences/:id/history). changedFields lists which of these
+ * fields the edit right after this snapshot actually changed — computed server-side.
+ * Scoped to the fields "Edit details" edits; rounds have their own edit-in-place UI and
+ * aren't covered by this history. */
+export interface ExperienceEditSnapshot {
+  id: UUID;
+  recordedAt: ISODateTime;
+  company: string;
+  roleTitle: string;
+  level?: string;
+  location?: string;
+  isRemote: boolean;
+  interviewMonth?: number;
+  interviewYear?: number;
+  outcome: ExperienceOutcome;
+  teaser: string;
+  prepAdvice?: string;
+  overallDifficulty?: number;
+  timeline?: string;
+  compensation?: string;
+  changedFields: string[];
+}
+
 /** Body for both POST /experiences (create draft) and PUT /experiences/:id (edit draft).
  * No price field — the platform sets it, contributors don't. */
 export interface ExperienceRequest {

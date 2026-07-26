@@ -1,9 +1,11 @@
 package com.knowyourinterview.api.experience;
 
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -22,6 +24,7 @@ import com.knowyourinterview.api.common.ForbiddenException;
 import com.knowyourinterview.api.common.InvalidStateException;
 import com.knowyourinterview.api.common.NotFoundException;
 import com.knowyourinterview.api.common.PagedResponse;
+import com.knowyourinterview.api.experience.dto.ExperienceEditSnapshotResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceFullResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceRequest;
 import com.knowyourinterview.api.experience.dto.ExperienceRoundResponse;
@@ -43,6 +46,7 @@ public class ExperienceService {
     private final ReviewLogRepository reviewLogRepository;
     private final PayoutRepository payoutRepository;
     private final ExperienceResponseAssembler responseAssembler;
+    private final ExperienceEditSnapshotRepository editSnapshotRepository;
     private final int defaultPricePaise;
     private final int maxPageSize;
 
@@ -55,6 +59,7 @@ public class ExperienceService {
             ReviewLogRepository reviewLogRepository,
             PayoutRepository payoutRepository,
             ExperienceResponseAssembler responseAssembler,
+            ExperienceEditSnapshotRepository editSnapshotRepository,
             @Value("${app.pricing.default-price-paise}") int defaultPricePaise,
             @Value("${app.pagination.max-page-size:100}") int maxPageSize) {
         this.experienceRepository = experienceRepository;
@@ -65,6 +70,7 @@ public class ExperienceService {
         this.reviewLogRepository = reviewLogRepository;
         this.payoutRepository = payoutRepository;
         this.responseAssembler = responseAssembler;
+        this.editSnapshotRepository = editSnapshotRepository;
         this.defaultPricePaise = defaultPricePaise;
         this.maxPageSize = maxPageSize;
     }
@@ -79,16 +85,49 @@ public class ExperienceService {
         return responseAssembler.toFullResponse(experience);
     }
 
+    /** Before applying the edit, saves a snapshot of the fields as they stood right up
+     * until now — but only if something in `req` actually differs from the current
+     * values. A contributor re-saving the form unchanged (e.g. just to check something)
+     * shouldn't pad the edit history with a no-op entry. See listEditHistory(), which
+     * turns the resulting sequence of snapshots into a diffed history view. */
     @Transactional
     public ExperienceFullResponse updateDraft(UUID contributorId, UUID experienceId, ExperienceRequest req) {
         Experience experience = getOwned(contributorId, experienceId);
         requireContentEditable(experience, "A published experience can't be edited directly — unpublish it first");
+        if (!diffFields(FieldValues.of(experience), FieldValues.of(req)).isEmpty()) {
+            editSnapshotRepository.save(new ExperienceEditSnapshot(UUID.randomUUID(), experience));
+        }
         experience.applyEdits(
                 req.company(), req.roleTitle(), req.level(), req.location(), req.isRemote(), req.interviewMonth(),
                 req.interviewYear(), req.outcome(), req.teaser(), req.prepAdvice(), req.overallDifficulty(),
                 req.timeline(), req.compensation());
         experienceRepository.save(experience);
         return responseAssembler.toFullResponse(experience);
+    }
+
+    /** Owner or admin — matches downloadProof's visibility pattern. Newest first; each
+     * entry is diffed against whatever state came right after it (a newer snapshot, or
+     * the current live experience for the most recent one), so "changedFields" always
+     * describes what that particular edit changed. Rounds aren't covered — see
+     * ExperienceEditSnapshot's Javadoc for why. */
+    @Transactional(readOnly = true)
+    public List<ExperienceEditSnapshotResponse> listEditHistory(UUID viewerId, boolean viewerIsAdmin, UUID experienceId) {
+        Experience experience = experienceRepository.findById(experienceId)
+                .orElseThrow(() -> new NotFoundException("Experience not found"));
+        boolean isOwner = viewerId != null && viewerId.equals(experience.getContributorId());
+        if (!isOwner && !viewerIsAdmin) {
+            throw new ForbiddenException("You don't have permission to view this experience's edit history");
+        }
+        List<ExperienceEditSnapshot> snapshots =
+                editSnapshotRepository.findByExperienceIdOrderByRecordedAtDesc(experienceId);
+        List<ExperienceEditSnapshotResponse> result = new ArrayList<>(snapshots.size());
+        FieldValues after = FieldValues.of(experience);
+        for (ExperienceEditSnapshot snapshot : snapshots) {
+            FieldValues before = FieldValues.of(snapshot);
+            result.add(ExperienceEditSnapshotResponse.from(snapshot, diffFields(before, after)));
+            after = before;
+        }
+        return result;
     }
 
     @Transactional
@@ -142,12 +181,17 @@ public class ExperienceService {
         deleteFileAfterCommit(doc.getStorageKey());
     }
 
-    /** Owner-only, DRAFT-or-REJECTED only (narrower than the content-editable window —
-     * withdrawing a submission entirely while an admin may be actively reviewing it is a
-     * bigger action than editing its content, so PENDING_REVIEW is deliberately excluded
-     * here even though it's now editable). Deletes the experience along with its rounds,
-     * proof documents (DB rows and stored files), and review-log history — a rejected
-     * submission the contributor doesn't want to fix, or a draft they abandoned.
+    /** Owner-only. Same window as requireContentEditable — DRAFT, PENDING_REVIEW, or
+     * REJECTED — so a contributor can withdraw a submission they no longer want reviewed
+     * without waiting for an admin to act on it first, not just delete a draft or a
+     * rejected one. (This used to be DRAFT-or-REJECTED-only, on the theory that deleting
+     * while PENDING_REVIEW was a bigger action than editing content mid-review. In
+     * practice contributors wanted a real way to pull a submission back rather than wait
+     * out a review they'd changed their mind about, so this now matches the same window
+     * everything else content-related already uses.) Deletes the experience along with
+     * its rounds, proof documents (DB rows and stored files), and review-log history — a
+     * rejected submission the contributor doesn't want to fix, a draft they abandoned, or
+     * a pending one they're withdrawing before a verdict comes back.
      *
      * Two extra guards beyond the status check: a DRAFT can also mean "this was
      * PUBLISHED and got unpublished for an edit" (see unpublish()), so it can carry real
@@ -160,7 +204,7 @@ public class ExperienceService {
     @Transactional
     public void deleteExperience(UUID contributorId, UUID experienceId) {
         Experience experience = getOwned(contributorId, experienceId);
-        requireDraftOrRejected(experience, "Only a draft or rejected experience can be deleted");
+        requireContentEditable(experience, "A published experience can't be deleted — unpublish it first");
         if (entitlementRepository.existsByExperienceId(experienceId)) {
             throw new InvalidStateException(
                     "This experience has been purchased and can't be deleted — unpublish it if you need to fix something, don't delete it");
@@ -173,6 +217,7 @@ public class ExperienceService {
         proofDocumentRepository.deleteAll(proofDocs);
         roundRepository.deleteByExperienceId(experienceId);
         reviewLogRepository.deleteByExperienceId(experienceId);
+        editSnapshotRepository.deleteByExperienceId(experienceId);
         experienceRepository.delete(experience);
         // Delete the stored files only after the whole delete commits — if the tx rolls
         // back the rows survive and their files must still be on disk (H1).
@@ -360,11 +405,9 @@ public class ExperienceService {
         }
     }
 
-    /** Narrower than requireContentEditable — DRAFT or REJECTED only, for the two actions
-     * that don't make sense mid-review: submitForReview (there's nothing to (re)submit
-     * while already PENDING_REVIEW) and deleteExperience (withdrawing a submission
-     * entirely while an admin may be actively looking at it is a bigger action than
-     * editing its content, so it's kept out of scope for PENDING_REVIEW). */
+    /** Narrower than requireContentEditable — DRAFT or REJECTED only. Used by
+     * submitForReview: there's nothing to (re)submit while already PENDING_REVIEW, so
+     * that one action stays out of scope even though deleteExperience no longer does. */
     private void requireDraftOrRejected(Experience experience, String message) {
         ExperienceStatus status = experience.getStatus();
         if (status != ExperienceStatus.DRAFT && status != ExperienceStatus.REJECTED) {
@@ -403,6 +446,58 @@ public class ExperienceService {
                 }
             });
         }
+    }
+
+    /** The subset of an experience's fields that EditDetailsForm edits and that edit
+     * history tracks — a common shape so updateDraft and listEditHistory can compare an
+     * Experience, an ExperienceEditSnapshot, and an incoming ExperienceRequest against
+     * each other without three separate ad-hoc comparisons. */
+    private record FieldValues(
+            String company, String roleTitle, String level, String location, boolean remote,
+            Short interviewMonth, Short interviewYear, ExperienceOutcome outcome, String teaser,
+            String prepAdvice, Short overallDifficulty, String timeline, String compensation) {
+
+        static FieldValues of(Experience e) {
+            return new FieldValues(
+                    e.getCompany(), e.getRoleTitle(), e.getLevel(), e.getLocation(), e.isRemote(),
+                    e.getInterviewMonth(), e.getInterviewYear(), e.getOutcome(), e.getTeaser(),
+                    e.getPrepAdvice(), e.getOverallDifficulty(), e.getTimeline(), e.getCompensation());
+        }
+
+        static FieldValues of(ExperienceEditSnapshot s) {
+            return new FieldValues(
+                    s.getCompany(), s.getRoleTitle(), s.getLevel(), s.getLocation(), s.isRemote(),
+                    s.getInterviewMonth(), s.getInterviewYear(), s.getOutcome(), s.getTeaser(),
+                    s.getPrepAdvice(), s.getOverallDifficulty(), s.getTimeline(), s.getCompensation());
+        }
+
+        static FieldValues of(ExperienceRequest r) {
+            return new FieldValues(
+                    r.company(), r.roleTitle(), r.level(), r.location(), r.isRemote(),
+                    r.interviewMonth(), r.interviewYear(), r.outcome(), r.teaser(),
+                    r.prepAdvice(), r.overallDifficulty(), r.timeline(), r.compensation());
+        }
+    }
+
+    /** Human-readable labels for whichever of `before`'s fields differ in `after` — used
+     * both to decide whether updateDraft has anything worth snapshotting, and to annotate
+     * each edit-history entry with what that particular edit changed. */
+    private List<String> diffFields(FieldValues before, FieldValues after) {
+        List<String> changed = new ArrayList<>();
+        if (!Objects.equals(before.company(), after.company())) changed.add("Company");
+        if (!Objects.equals(before.roleTitle(), after.roleTitle())) changed.add("Role title");
+        if (!Objects.equals(before.level(), after.level())) changed.add("Level");
+        if (!Objects.equals(before.location(), after.location())) changed.add("Location");
+        if (before.remote() != after.remote()) changed.add("Remote");
+        if (!Objects.equals(before.interviewMonth(), after.interviewMonth())) changed.add("Interview month");
+        if (!Objects.equals(before.interviewYear(), after.interviewYear())) changed.add("Interview year");
+        if (!Objects.equals(before.outcome(), after.outcome())) changed.add("Outcome");
+        if (!Objects.equals(before.teaser(), after.teaser())) changed.add("Teaser");
+        if (!Objects.equals(before.prepAdvice(), after.prepAdvice())) changed.add("Prep advice");
+        if (!Objects.equals(before.overallDifficulty(), after.overallDifficulty())) changed.add("Overall difficulty");
+        if (!Objects.equals(before.timeline(), after.timeline())) changed.add("Timeline");
+        if (!Objects.equals(before.compensation(), after.compensation())) changed.add("Compensation");
+        return changed;
     }
 
     private static String joinTags(List<String> tags) {

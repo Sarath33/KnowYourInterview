@@ -64,8 +64,8 @@ class PayoutServiceTest {
 
         when(payoutRepository.findByStatusInOrderByCreatedAtAsc(List.of(Payout.Status.PENDING, Payout.Status.PROCESSING)))
                 .thenReturn(List.of(payout));
-        when(experienceRepository.findById(experienceId)).thenReturn(Optional.of(experience));
-        when(userRepository.findById(contributorId)).thenReturn(Optional.of(contributor));
+        when(experienceRepository.findAllById(List.of(experienceId))).thenReturn(List.of(experience));
+        when(userRepository.findAllById(List.of(contributorId))).thenReturn(List.of(contributor));
 
         List<PayoutResponse> queue = service.queue();
 
@@ -80,7 +80,8 @@ class PayoutServiceTest {
         UUID experienceId = UUID.randomUUID();
         Payout payout = new Payout(UUID.randomUUID(), experienceId, UUID.randomUUID(), 50000);
         when(payoutRepository.findByStatusInOrderByCreatedAtAsc(any())).thenReturn(List.of(payout));
-        when(experienceRepository.findById(experienceId)).thenReturn(Optional.empty());
+        // No experienceRepository stub — findAllById defaults to an empty list for an
+        // unstubbed mock, exactly matching "the experience is gone".
 
         assertThatThrownBy(() -> service.queue()).isInstanceOf(NotFoundException.class);
     }
@@ -149,7 +150,7 @@ class PayoutServiceTest {
         UUID experienceId = UUID.randomUUID();
         Payout payout = new Payout(UUID.randomUUID(), experienceId, contributorId, 50000);
         when(payoutRepository.findByContributorIdOrderByCreatedAtDesc(contributorId)).thenReturn(List.of(payout));
-        when(experienceRepository.findById(experienceId)).thenReturn(Optional.of(someExperience(experienceId)));
+        when(experienceRepository.findAllById(List.of(experienceId))).thenReturn(List.of(someExperience(experienceId)));
 
         List<PayoutResponse> mine = service.listMine(contributorId);
 

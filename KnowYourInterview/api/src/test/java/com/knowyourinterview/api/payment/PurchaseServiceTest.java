@@ -47,6 +47,8 @@ class PurchaseServiceTest {
     private PurchaseRepository purchaseRepository;
     @Mock
     private EntitlementRepository entitlementRepository;
+    @Mock
+    private PurchaseOrderPersister orderPersister;
 
     private PurchaseService service;
 
@@ -55,7 +57,7 @@ class PurchaseServiceTest {
         // Blank keys are intentional: it lets createOrder's guard-clause tests run without
         // ever reaching the real Razorpay network call (see class Javadoc above).
         service = new PurchaseService(
-                experienceRepository, purchaseRepository, entitlementRepository, "", "", "whsec_test");
+                experienceRepository, purchaseRepository, entitlementRepository, orderPersister, "", "", "whsec_test");
     }
 
     private Experience publishedExperience() {
@@ -238,7 +240,7 @@ class PurchaseServiceTest {
     @Test
     void verifyWebhookSignatureRejectsWhenSecretNotConfigured() {
         PurchaseService noSecretService = new PurchaseService(
-                experienceRepository, purchaseRepository, entitlementRepository, "", "", "");
+                experienceRepository, purchaseRepository, entitlementRepository, orderPersister, "", "", "");
 
         assertThat(noSecretService.verifyWebhookSignature("{}", "sig")).isFalse();
     }

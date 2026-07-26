@@ -20,17 +20,21 @@ import org.springframework.mock.web.MockMultipartFile;
 import com.knowyourinterview.api.common.ForbiddenException;
 import com.knowyourinterview.api.common.InvalidStateException;
 import com.knowyourinterview.api.common.NotFoundException;
+import com.knowyourinterview.api.experience.dto.ExperienceEditSnapshotResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceFullResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceRequest;
 import com.knowyourinterview.api.experience.dto.ExperienceRoundResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceViewResponse;
+import com.knowyourinterview.api.experience.dto.ProofDocumentResponse;
 import com.knowyourinterview.api.experience.dto.RoundRequest;
 import com.knowyourinterview.api.payment.EntitlementRepository;
+import com.knowyourinterview.api.payout.PayoutRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -45,6 +49,7 @@ import static org.mockito.Mockito.when;
 class ExperienceServiceTest {
 
     private static final int DEFAULT_PRICE_PAISE = 19900;
+    private static final int MAX_PAGE_SIZE = 100;
 
     @Mock
     private ExperienceRepository experienceRepository;
@@ -60,17 +65,52 @@ class ExperienceServiceTest {
     private ReviewLogRepository reviewLogRepository;
     @Mock
     private PayoutRepository payoutRepository;
+    @Mock
+    private ExperienceResponseAssembler responseAssembler;
+    @Mock
+    private ExperienceEditSnapshotRepository editSnapshotRepository;
 
     private ExperienceService service;
 
     private final UUID contributorId = UUID.randomUUID();
 
+    /** Mirrors ExperienceResponseAssembler's real toFullResponse/buildMany against this
+     * test's own repo mocks, so every existing assertion on the built response (roundCount,
+     * unlockCount, etc.) keeps working exactly as it did before that logic was extracted
+     * into its own class — only ExperienceService's own behavior is under test here, not
+     * the assembler's (that has its own test coverage). lenient() because plenty of tests
+     * below never reach a response-building call at all (they throw first). */
     @BeforeEach
     void setUp() {
         service = new ExperienceService(
                 experienceRepository, roundRepository, proofDocumentRepository,
                 proofStorageService, entitlementRepository, reviewLogRepository, payoutRepository,
-                DEFAULT_PRICE_PAISE);
+                responseAssembler, editSnapshotRepository, DEFAULT_PRICE_PAISE, MAX_PAGE_SIZE);
+
+        lenient().when(responseAssembler.toFullResponse(any())).thenAnswer(inv -> {
+            Experience e = inv.getArgument(0);
+            return ExperienceFullResponse.from(e, roundResponsesFor(e), proofResponsesFor(e),
+                    entitlementRepository.countByExperienceId(e.getId()));
+        });
+        lenient().when(responseAssembler.buildMany(any())).thenAnswer(inv -> {
+            List<Experience> experiences = inv.getArgument(0);
+            return experiences.stream()
+                    .map(e -> ExperienceFullResponse.from(e, roundResponsesFor(e), proofResponsesFor(e),
+                            entitlementRepository.countByExperienceId(e.getId())))
+                    .toList();
+        });
+    }
+
+    private List<ExperienceRoundResponse> roundResponsesFor(Experience e) {
+        return roundRepository.findByExperienceIdOrderByRoundNumberAsc(e.getId()).stream()
+                .map(ExperienceRoundResponse::from)
+                .toList();
+    }
+
+    private List<ProofDocumentResponse> proofResponsesFor(Experience e) {
+        return proofDocumentRepository.findByExperienceId(e.getId()).stream()
+                .map(ProofDocumentResponse::from)
+                .toList();
     }
 
     private ExperienceRequest sampleRequest() {
@@ -159,6 +199,109 @@ class ExperienceServiceTest {
 
         assertThatThrownBy(() -> service.updateDraft(contributorId, experience.getId(), sampleRequest()))
                 .isInstanceOf(InvalidStateException.class);
+    }
+
+    // --- updateDraft edit-history snapshotting ---
+
+    /** Matches draftOwnedByContributor()'s field values exactly, so submitting this
+     * through updateDraft is a genuine no-op edit. */
+    private ExperienceRequest requestMatchingDraftOwnedByContributor() {
+        return new ExperienceRequest(
+                "Acme", "Backend Engineer", "L4", "Bengaluru", true,
+                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser",
+                "advice", (short) 3, "3 weeks", "35 LPA");
+    }
+
+    @Test
+    void updateDraftSavesASnapshotWhenSomethingActuallyChanges() {
+        Experience experience = draftOwnedByContributor();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        service.updateDraft(contributorId, experience.getId(), sampleRequest());
+
+        verify(editSnapshotRepository).save(any());
+    }
+
+    @Test
+    void updateDraftSkipsTheSnapshotWhenNothingActuallyChanged() {
+        // A contributor re-saving the form unchanged shouldn't pad the edit history.
+        Experience experience = draftOwnedByContributor();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        service.updateDraft(contributorId, experience.getId(), requestMatchingDraftOwnedByContributor());
+
+        verify(editSnapshotRepository, never()).save(any());
+    }
+
+    // --- listEditHistory ---
+
+    @Test
+    void listEditHistoryRejectsUnknownExperience() {
+        UUID missingId = UUID.randomUUID();
+        when(experienceRepository.findById(missingId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.listEditHistory(contributorId, false, missingId))
+                .isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void listEditHistoryRejectsNonOwnerNonAdmin() {
+        Experience experience = draftOwnedByContributor();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        assertThatThrownBy(() -> service.listEditHistory(UUID.randomUUID(), false, experience.getId()))
+                .isInstanceOf(ForbiddenException.class);
+    }
+
+    @Test
+    void listEditHistoryAllowsAnAdminEvenWhenNotTheOwner() {
+        Experience experience = draftOwnedByContributor();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        when(editSnapshotRepository.findByExperienceIdOrderByRecordedAtDesc(experience.getId()))
+                .thenReturn(List.of());
+
+        List<ExperienceEditSnapshotResponse> history =
+                service.listEditHistory(UUID.randomUUID(), true, experience.getId());
+
+        assertThat(history).isEmpty();
+    }
+
+    @Test
+    void listEditHistoryOrdersNewestFirstAndDiffsEachSnapshotAgainstWhatCameNext() {
+        // Timeline: v1 ("Old Co" / "teaser v1") -> edited to v2 ("Mid Co" / "teaser v2",
+        // snapshot A records v1) -> edited to the current live state ("Acme" / "teaser",
+        // snapshot B records v2). listEditHistory should return [B, A] (newest first),
+        // with B diffed against the current experience and A diffed against B.
+        Experience current = draftOwnedByContributor(); // "Acme" / "teaser"
+
+        Experience v2State = draftOwnedByContributor();
+        v2State.applyEdits(
+                "Mid Co", v2State.getRoleTitle(), v2State.getLevel(), v2State.getLocation(), v2State.isRemote(),
+                v2State.getInterviewMonth(), v2State.getInterviewYear(), v2State.getOutcome(), "teaser v2",
+                v2State.getPrepAdvice(), v2State.getOverallDifficulty(), v2State.getTimeline(), v2State.getCompensation());
+        ExperienceEditSnapshot snapshotB = new ExperienceEditSnapshot(UUID.randomUUID(), v2State);
+
+        Experience v1State = draftOwnedByContributor();
+        v1State.applyEdits(
+                "Old Co", v1State.getRoleTitle(), v1State.getLevel(), v1State.getLocation(), v1State.isRemote(),
+                v1State.getInterviewMonth(), v1State.getInterviewYear(), v1State.getOutcome(), "teaser v1",
+                v1State.getPrepAdvice(), v1State.getOverallDifficulty(), v1State.getTimeline(), v1State.getCompensation());
+        ExperienceEditSnapshot snapshotA = new ExperienceEditSnapshot(UUID.randomUUID(), v1State);
+
+        when(experienceRepository.findById(current.getId())).thenReturn(Optional.of(current));
+        when(editSnapshotRepository.findByExperienceIdOrderByRecordedAtDesc(current.getId()))
+                .thenReturn(List.of(snapshotB, snapshotA)); // repo contract: newest first
+
+        List<ExperienceEditSnapshotResponse> history =
+                service.listEditHistory(contributorId, false, current.getId());
+
+        assertThat(history).hasSize(2);
+        assertThat(history.get(0).id()).isEqualTo(snapshotB.getId());
+        assertThat(history.get(0).company()).isEqualTo("Mid Co");
+        assertThat(history.get(0).changedFields()).containsExactlyInAnyOrder("Company", "Teaser");
+        assertThat(history.get(1).id()).isEqualTo(snapshotA.getId());
+        assertThat(history.get(1).company()).isEqualTo("Old Co");
+        assertThat(history.get(1).changedFields()).containsExactlyInAnyOrder("Company", "Teaser");
     }
 
     // --- addRound / deleteRound ---
@@ -869,6 +1012,7 @@ class ExperienceServiceTest {
         verify(proofDocumentRepository).deleteAll(List.of(doc1, doc2));
         verify(roundRepository).deleteByExperienceId(experience.getId());
         verify(reviewLogRepository).deleteByExperienceId(experience.getId());
+        verify(editSnapshotRepository).deleteByExperienceId(experience.getId());
         verify(experienceRepository).delete(experience);
     }
 
@@ -923,18 +1067,17 @@ class ExperienceServiceTest {
     }
 
     @Test
-    void deleteExperienceRejectsAPendingReviewExperience() {
-        // Deliberate asymmetry vs. content edits: PENDING_REVIEW is now editable, but
-        // withdrawing a submission outright while an admin may be actively reviewing it
-        // is a bigger action than a content edit — deleteExperience stays DRAFT/REJECTED
-        // only. See requireDraftOrRejected's Javadoc.
+    void deleteExperienceWorksOnAPendingReviewExperienceToo() {
+        // A contributor can withdraw a submission before an admin has acted on it, not
+        // just delete a draft or a rejected one — same window as requireContentEditable.
         Experience experience = draftOwnedByContributor();
         experience.markPendingReview();
         when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        when(proofDocumentRepository.findByExperienceId(experience.getId())).thenReturn(List.of());
 
-        assertThatThrownBy(() -> service.deleteExperience(contributorId, experience.getId()))
-                .isInstanceOf(InvalidStateException.class);
-        verify(experienceRepository, never()).delete(any());
+        service.deleteExperience(contributorId, experience.getId());
+
+        verify(experienceRepository).delete(experience);
     }
 
     @Test

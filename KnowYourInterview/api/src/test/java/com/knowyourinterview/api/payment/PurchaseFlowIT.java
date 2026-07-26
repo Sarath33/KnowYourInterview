@@ -116,7 +116,7 @@ class PurchaseFlowIT {
                 ExperienceFullResponse.class);
         assertThat(approved.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(approved.getBody().status().name()).isEqualTo("PUBLISHED");
-        int pricePaise = approved.getBody().pricePaise();
+        long pricePaise = approved.getBody().pricePaise();
 
         // --- Viewer sees only the teaser before paying ---
         AuthResponse viewer = register("Viewer", unique("viewer"));

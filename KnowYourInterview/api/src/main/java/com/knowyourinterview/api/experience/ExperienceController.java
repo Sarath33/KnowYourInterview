@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.knowyourinterview.api.common.PagedResponse;
+import com.knowyourinterview.api.experience.dto.ExperienceEditSnapshotResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceFullResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceRequest;
 import com.knowyourinterview.api.experience.dto.ExperienceRoundResponse;
@@ -157,5 +158,12 @@ public class ExperienceController {
         UUID viewerId = user == null ? null : user.id();
         boolean isAdmin = user != null && user.admin();
         return experienceService.getPublicView(viewerId, isAdmin, id);
+    }
+
+    /** Owner or admin — see ExperienceService#listEditHistory. */
+    @GetMapping("/{id}/history")
+    public List<ExperienceEditSnapshotResponse> history(
+            @AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID id) {
+        return experienceService.listEditHistory(user.id(), user.admin(), id);
     }
 }

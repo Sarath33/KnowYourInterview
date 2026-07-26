@@ -9,6 +9,7 @@ import type {
   RejectRequest,
   ExperienceFull,
   ExperienceRound,
+  ExperienceEditSnapshot,
   ExperienceTeaser,
   ExperienceView,
   ProofDocument,
@@ -184,6 +185,10 @@ export async function updateExperience(id: string, body: ExperienceRequest): Pro
     method: "PUT",
     body: JSON.stringify(body),
   });
+}
+
+export async function getEditHistory(id: string): Promise<ExperienceEditSnapshot[]> {
+  return request(`/api/v1/experiences/${id}/history`);
 }
 
 export async function addRound(id: string, body: RoundRequest): Promise<ExperienceRound> {

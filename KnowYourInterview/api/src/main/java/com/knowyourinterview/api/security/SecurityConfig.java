@@ -1,7 +1,9 @@
 package com.knowyourinterview.api.security;
 
+import java.util.Arrays;
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -25,6 +27,13 @@ public class SecurityConfig {
 
     private final JwtService jwtService;
     private final StringRedisTemplate redisTemplate;
+
+    // Comma-separated list of allowed origins. Defaults to the local-dev patterns so
+    // nothing changes for anyone running without the env var set. For a deployed
+    // environment, set CORS_ALLOWED_ORIGINS to the exact web app origin(s), e.g.
+    // "https://kyi-web.up.railway.app" — no wildcards needed since it's a single known host.
+    @Value("${CORS_ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}")
+    private String corsAllowedOrigins;
 
     public SecurityConfig(JwtService jwtService, StringRedisTemplate redisTemplate) {
         this.jwtService = jwtService;
@@ -51,7 +60,8 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("http://localhost:*", "http://127.0.0.1:*"));
+        configuration.setAllowedOriginPatterns(
+                Arrays.stream(corsAllowedOrigins.split(",")).map(String::trim).toList());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(false);

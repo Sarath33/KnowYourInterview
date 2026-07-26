@@ -3,9 +3,11 @@ spring:
     name: know-your-interview-api
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/kyi
-    username: kyi
-    password: kyi_dev_password
+    # Local-dev defaults below. Override with DB_URL/DB_USERNAME/DB_PASSWORD env vars for
+    # any shared/deployed environment — same pattern as JWT_SECRET further down.
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/kyi}
+    username: ${DB_USERNAME:kyi}
+    password: ${DB_PASSWORD:kyi_dev_password}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -23,8 +25,11 @@ spring:
 
   data:
     redis:
-      host: localhost
-      port: 6379
+      # A single connection URL (redis://[:password@]host:port[/db]) covers host, port,
+      # and auth in one property — matches what most hosted Redis add-ons (Railway
+      # included) hand you as a single REDIS_URL env var, so no separate host/port/
+      # password wiring is needed.
+      url: ${REDIS_URL:redis://localhost:6379}
 
   servlet:
     multipart:

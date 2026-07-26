@@ -14,11 +14,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.knowyourinterview.api.common.InvalidStateException;
 import com.knowyourinterview.api.common.NotFoundException;
 import com.knowyourinterview.api.experience.dto.ExperienceFullResponse;
-import com.knowyourinterview.api.payment.EntitlementRepository;
+import com.knowyourinterview.api.payout.Payout;
+import com.knowyourinterview.api.payout.PayoutRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -32,28 +34,38 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class AdminReviewServiceTest {
 
-    private static final int CONTRIBUTOR_PAYOUT_PAISE = 50000;
+    private static final long CONTRIBUTOR_PAYOUT_PAISE = 50000;
 
     @Mock
     private ExperienceRepository experienceRepository;
-    @Mock
-    private ExperienceRoundRepository roundRepository;
-    @Mock
-    private ProofDocumentRepository proofDocumentRepository;
     @Mock
     private ReviewLogRepository reviewLogRepository;
     @Mock
     private PayoutRepository payoutRepository;
     @Mock
-    private EntitlementRepository entitlementRepository;
+    private ExperienceResponseAssembler responseAssembler;
 
     private AdminReviewService service;
 
     @BeforeEach
     void setUp() {
         service = new AdminReviewService(
-                experienceRepository, roundRepository, proofDocumentRepository,
-                reviewLogRepository, payoutRepository, entitlementRepository, CONTRIBUTOR_PAYOUT_PAISE);
+                experienceRepository, reviewLogRepository, payoutRepository, responseAssembler,
+                CONTRIBUTOR_PAYOUT_PAISE);
+
+        // See ExperienceServiceTest for why this is lenient() and built from the raw
+        // Experience rather than stubbed per-test: most tests here only care about the
+        // status-machine side effects, not the response shape, and roundRepository /
+        // proofDocumentRepository / entitlementRepository aren't part of this service at
+        // all anymore (extracted into the assembler, which has its own coverage).
+        lenient().when(responseAssembler.toFullResponse(any()))
+                .thenAnswer(inv -> ExperienceFullResponse.from(inv.getArgument(0), List.of(), List.of(), 0L));
+        lenient().when(responseAssembler.buildMany(any())).thenAnswer(inv -> {
+            List<Experience> experiences = inv.getArgument(0);
+            return experiences.stream()
+                    .map(e -> ExperienceFullResponse.from(e, List.of(), List.of(), 0L))
+                    .toList();
+        });
     }
 
     private Experience pendingReviewExperience() {

@@ -14,6 +14,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.knowyourinterview.api.common.PagedResponse;
+import com.knowyourinterview.api.experience.dto.ExperienceEditSnapshotResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceFullResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceTeaserResponse;
 import com.knowyourinterview.api.experience.dto.ExperienceViewResponse;
@@ -121,5 +122,34 @@ class ExperienceControllerTest {
                 .andExpect(jsonPath("$.entitled").value(false))
                 .andExpect(jsonPath("$.teaser.company").value("Acme"))
                 .andExpect(jsonPath("$.full").doesNotExist());
+    }
+
+    @Test
+    void historyRequiresAuth() throws Exception {
+        // Regression check, same shape as mineRequiresAuthDespiteMatchingTheSingleSegmentBrowsePattern
+        // above: "/{id}/history" has two segments after "/experiences/", so it doesn't
+        // match the single-segment "/api/v1/experiences/*" permitAll rule in
+        // SecurityConfig — but worth a direct check since a future refactor of that
+        // pattern could silently widen it.
+        mockMvc.perform(get("/api/v1/experiences/" + UUID.randomUUID() + "/history"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void historyReturnsSnapshotsWhenAuthenticated() throws Exception {
+        UUID contributorId = UUID.randomUUID();
+        UUID id = UUID.randomUUID();
+        ExperienceEditSnapshotResponse snapshot = new ExperienceEditSnapshotResponse(
+                UUID.randomUUID(), Instant.now(), "Old Co", "Backend Engineer", "L4", "Remote", true,
+                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "old teaser", "old advice", (short) 3,
+                "3 weeks", "35 LPA", List.of("Company"));
+        when(experienceService.listEditHistory(eq(contributorId), eq(false), eq(id)))
+                .thenReturn(List.of(snapshot));
+
+        mockMvc.perform(get("/api/v1/experiences/" + id + "/history")
+                        .header("Authorization", bearerTokenFor(contributorId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].company").value("Old Co"))
+                .andExpect(jsonPath("$[0].changedFields[0]").value("Company"));
     }
 }
