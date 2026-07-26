@@ -40,9 +40,15 @@ public record ExperienceFullResponse(
         List<ProofDocumentResponse> proofDocuments,
         // Mirrors ExperienceTeaserResponse#unlocked for the same shared/types.ts extends
         // reason as roundCount above. Always true here: reaching a full response at all
-        // means the caller is the owner, an admin, or a paying entitlement holder — every
-        // one of those already has full access, so there's no "locked" full response.
-        boolean unlocked) {
+        // means the caller is the owner, an admin, a paying entitlement holder, or (for a
+        // free experience) any viewer at all — every one of those already has full access,
+        // so there's no "locked" full response.
+        boolean unlocked,
+        // Mirrors ExperienceTeaserResponse#isFree/sourceUrl/sourceName — see Experience's
+        // Javadoc on those fields.
+        boolean isFree,
+        String sourceUrl,
+        String sourceName) {
 
     public static ExperienceFullResponse from(
             Experience e, List<ExperienceRoundResponse> rounds, List<ProofDocumentResponse> proof, long unlockCount) {
@@ -51,6 +57,6 @@ public record ExperienceFullResponse(
                 e.isRemote(), e.getInterviewMonth(), e.getInterviewYear(), e.getOutcome(), e.getTeaser(),
                 e.getPricePaise(), rounds.size(), e.getPublishedAt(), e.getStatus(), e.getPrepAdvice(),
                 e.getOverallDifficulty(), e.getTimeline(), e.getCompensation(), e.getRejectionReason(), unlockCount,
-                rounds, proof, true);
+                rounds, proof, true, e.isFree(), e.getSourceUrl(), e.getSourceName());
     }
 }

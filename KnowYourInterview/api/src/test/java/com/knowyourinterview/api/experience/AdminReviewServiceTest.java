@@ -111,6 +111,24 @@ class AdminReviewServiceTest {
     }
 
     @Test
+    void approveDoesNotCreateAPayoutForAFreeReferenceSubmission() {
+        Experience experience = pendingReviewExperience();
+        experience.markAsReference("https://example.com/writeup", "Example Blog");
+        UUID adminId = UUID.randomUUID();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        ExperienceFullResponse response = service.approve(adminId, experience.getId());
+
+        assertThat(response.status()).isEqualTo(ExperienceStatus.PUBLISHED);
+        assertThat(response.isFree()).isTrue();
+        verify(payoutRepository, never()).save(any());
+        // Still logged and published normally — only the payout is skipped, since a
+        // reference submission (unlike a self free-contribution) does still go through
+        // review.
+        verify(reviewLogRepository).save(any());
+    }
+
+    @Test
     void approveRejectsExperienceThatIsNotPendingReview() {
         Experience draft = new Experience(
                 UUID.randomUUID(), UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Bengaluru",

@@ -205,12 +205,23 @@ function FullExperience({
         <OutcomeTag outcome={full.outcome} />
         {full.isRemote && <RemoteTag />}
       </div>
-      {(recency || full.publishedAt) && (
+      {(recency || full.publishedAt || full.isFree) && (
         <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 24 }}>
           {recency}
-          {recency && full.publishedAt && " · "}
-          {full.publishedAt &&
-            `Unlocked by ${full.unlockCount} ${full.unlockCount === 1 ? "person" : "people"}`}
+          {recency && (full.publishedAt || full.isFree) && " · "}
+          {full.isFree
+            ? "Free"
+            : full.publishedAt &&
+              `Unlocked by ${full.unlockCount} ${full.unlockCount === 1 ? "person" : "people"}`}
+          {full.isFree && full.sourceUrl && (
+            <>
+              {" · "}
+              Summarized from{" "}
+              <a href={full.sourceUrl} target="_blank" rel="noopener noreferrer">
+                {full.sourceName || "the original source"}
+              </a>
+            </>
+          )}
         </div>
       )}
 

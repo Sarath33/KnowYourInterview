@@ -23,12 +23,20 @@ public record ExperienceTeaserResponse(
         int roundCount,
         Instant publishedAt,
         // False for a guest or for a signed-in viewer who hasn't purchased this one yet.
-        boolean unlocked) {
+        // Always effectively true for a free experience too — see ExperienceService
+        // #getPublicView, which grants full access to anyone once isFree && PUBLISHED.
+        boolean unlocked,
+        // Admin-authored "reference a public source" submissions are always free — see
+        // Experience's Javadoc on sourceUrl. pricePaise is 0 (not meaningful) when this
+        // is true.
+        boolean isFree,
+        String sourceUrl,
+        String sourceName) {
 
     public static ExperienceTeaserResponse from(Experience e, long roundCount, boolean unlocked) {
         return new ExperienceTeaserResponse(
                 e.getId(), e.getCompany(), e.getRoleTitle(), e.getLevel(), e.getLocation(), e.isRemote(),
                 e.getInterviewMonth(), e.getInterviewYear(), e.getOutcome(), e.getTeaser(), e.getPricePaise(),
-                (int) roundCount, e.getPublishedAt(), unlocked);
+                (int) roundCount, e.getPublishedAt(), unlocked, e.isFree(), e.getSourceUrl(), e.getSourceName());
     }
 }

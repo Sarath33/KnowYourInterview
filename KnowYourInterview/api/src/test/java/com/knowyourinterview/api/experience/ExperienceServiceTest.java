@@ -117,7 +117,22 @@ class ExperienceServiceTest {
         return new ExperienceRequest(
                 "Acme", "Backend Engineer", "L4", "Bengaluru", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Went well overall.",
-                "Practice system design.", (short) 3, "3 weeks", "35 LPA");
+                "Practice system design.", (short) 3, "3 weeks", "35 LPA", null, null, false);
+    }
+
+    private ExperienceRequest referenceRequest() {
+        return new ExperienceRequest(
+                "Acme", "Backend Engineer", "L4", "Bengaluru", true,
+                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Went well overall.",
+                "Practice system design.", (short) 3, "3 weeks", "35 LPA",
+                "https://example.com/interview-writeup", "Example Blog", false);
+    }
+
+    private ExperienceRequest freeContributionRequest() {
+        return new ExperienceRequest(
+                "Acme", "Backend Engineer", "L4", "Bengaluru", true,
+                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Went well overall.",
+                "Practice system design.", (short) 3, "3 weeks", "35 LPA", null, null, true);
     }
 
     private Experience draftOwnedByContributor() {
@@ -127,19 +142,58 @@ class ExperienceServiceTest {
                 (short) 3, "3 weeks", "35 LPA", DEFAULT_PRICE_PAISE);
     }
 
+    private Experience freeContributionDraftOwnedByContributor() {
+        Experience experience = new Experience(
+                UUID.randomUUID(), contributorId, "Acme", "Backend Engineer", "L4", "Bengaluru",
+                true, (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser", "advice",
+                (short) 3, "3 weeks", "35 LPA", 0);
+        experience.markAsFreeContribution();
+        return experience;
+    }
+
     // --- createDraft ---
 
     @Test
     void createDraftSavesNewExperienceAtDefaultPriceAndDraftStatus() {
-        ExperienceFullResponse response = service.createDraft(contributorId, sampleRequest());
+        ExperienceFullResponse response = service.createDraft(contributorId, false, sampleRequest());
 
         assertThat(response.company()).isEqualTo("Acme");
         assertThat(response.status()).isEqualTo(ExperienceStatus.DRAFT);
         assertThat(response.pricePaise()).isEqualTo(DEFAULT_PRICE_PAISE);
+        assertThat(response.isFree()).isFalse();
         // A brand new draft has no rounds yet — roundCount should reflect that, not be null/unset.
         assertThat(response.roundCount()).isZero();
         // Nobody's unlocked a draft that was never published.
         assertThat(response.unlockCount()).isZero();
+        verify(experienceRepository).save(any(Experience.class));
+    }
+
+    @Test
+    void createDraftRejectsSourceReferenceFromNonAdmin() {
+        assertThatThrownBy(() -> service.createDraft(contributorId, false, referenceRequest()))
+                .isInstanceOf(ForbiddenException.class);
+        verify(experienceRepository, never()).save(any());
+    }
+
+    @Test
+    void createDraftAllowsSourceReferenceFromAdminAndForcesFree() {
+        ExperienceFullResponse response = service.createDraft(contributorId, true, referenceRequest());
+
+        assertThat(response.isFree()).isTrue();
+        assertThat(response.pricePaise()).isZero();
+        assertThat(response.sourceUrl()).isEqualTo("https://example.com/interview-writeup");
+        assertThat(response.sourceName()).isEqualTo("Example Blog");
+        verify(experienceRepository).save(any(Experience.class));
+    }
+
+    @Test
+    void createDraftAllowsFreeContributionFromAnyNonAdminContributor() {
+        ExperienceFullResponse response = service.createDraft(contributorId, false, freeContributionRequest());
+
+        assertThat(response.isFree()).isTrue();
+        assertThat(response.pricePaise()).isZero();
+        assertThat(response.sourceUrl()).isNull();
+        assertThat(response.sourceName()).isNull();
         verify(experienceRepository).save(any(Experience.class));
     }
 
@@ -153,7 +207,7 @@ class ExperienceServiceTest {
         ExperienceRequest updated = new ExperienceRequest(
                 "New Co", "Staff Engineer", "L5", "Remote", true,
                 (short) 7, (short) 2026, ExperienceOutcome.OFFER, "new teaser",
-                "new advice", (short) 4, "2 weeks", "45 LPA");
+                "new advice", (short) 4, "2 weeks", "45 LPA", null, null, false);
         ExperienceFullResponse response = service.updateDraft(contributorId, experience.getId(), updated);
 
         assertThat(response.company()).isEqualTo("New Co");
@@ -209,7 +263,7 @@ class ExperienceServiceTest {
         return new ExperienceRequest(
                 "Acme", "Backend Engineer", "L4", "Bengaluru", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser",
-                "advice", (short) 3, "3 weeks", "35 LPA");
+                "advice", (short) 3, "3 weeks", "35 LPA", null, null, false);
     }
 
     @Test
@@ -530,6 +584,32 @@ class ExperienceServiceTest {
         assertThat(response.status()).isEqualTo(ExperienceStatus.PENDING_REVIEW);
     }
 
+    @Test
+    void submitForReviewPublishesAFreeContributionInstantlyWithoutAProofDocument() {
+        Experience experience = freeContributionDraftOwnedByContributor();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        when(roundRepository.countByExperienceId(experience.getId())).thenReturn(1L);
+        // Deliberately never stubbing proofDocumentRepository.countByExperienceId — a free
+        // contribution must not even check it, since nothing about that call should matter.
+
+        ExperienceFullResponse response = service.submitForReview(contributorId, experience.getId());
+
+        assertThat(response.status()).isEqualTo(ExperienceStatus.PUBLISHED);
+        assertThat(response.publishedAt()).isNotNull();
+        verify(proofDocumentRepository, never()).countByExperienceId(any());
+    }
+
+    @Test
+    void submitForReviewStillRequiresARoundForAFreeContribution() {
+        Experience experience = freeContributionDraftOwnedByContributor();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        when(roundRepository.countByExperienceId(experience.getId())).thenReturn(0L);
+
+        assertThatThrownBy(() -> service.submitForReview(contributorId, experience.getId()))
+                .isInstanceOf(InvalidStateException.class)
+                .hasMessageContaining("round");
+    }
+
     // --- getPublicView ---
 
     @Test
@@ -599,6 +679,20 @@ class ExperienceServiceTest {
         ExperienceViewResponse response = service.getPublicView(null, false, experience.getId());
 
         assertThat(response.entitled()).isFalse();
+    }
+
+    @Test
+    void getPublicViewGivesAnonymousViewerFullAccessToAFreePublishedExperience() {
+        Experience experience = draftOwnedByContributor();
+        experience.markAsReference("https://example.com/writeup", "Example Blog");
+        experience.markPendingReview();
+        experience.publish();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        ExperienceViewResponse response = service.getPublicView(null, false, experience.getId());
+
+        assertThat(response.entitled()).isTrue();
+        assertThat(response.full().isFree()).isTrue();
     }
 
     @Test

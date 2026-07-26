@@ -71,6 +71,11 @@ public class PurchaseService {
         if (experience.getStatus() != ExperienceStatus.PUBLISHED) {
             throw new InvalidStateException("This experience isn't published yet");
         }
+        // Admin-authored "reference a public source" experiences are always free — nothing
+        // to check out, getPublicView already grants everyone full access directly.
+        if (experience.isFree()) {
+            throw new InvalidStateException("This experience is free — no need to unlock it");
+        }
         if (entitlementRepository.existsByUserIdAndExperienceId(userId, experienceId)) {
             throw new InvalidStateException("You already have access to this experience");
         }

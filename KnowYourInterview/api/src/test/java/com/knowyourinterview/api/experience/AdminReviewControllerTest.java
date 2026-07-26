@@ -46,7 +46,8 @@ class AdminReviewControllerTest {
         return new ExperienceFullResponse(
                 UUID.randomUUID(), UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Remote", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, 0, null,
-                ExperienceStatus.PENDING_REVIEW, null, null, null, null, null, 0, List.of(), List.of(), true);
+                ExperienceStatus.PENDING_REVIEW, null, null, null, null, null, 0, List.of(), List.of(), true,
+                false, null, null);
     }
 
     @Test

@@ -63,9 +63,16 @@ public class AdminReviewService {
 
         // Creates the ledger row at PENDING. Money movement itself is a manual batch
         // process (admin wires it themselves, then marks it paid) rather than a live
-        // RazorpayX transfer — see Payout.java and PayoutService for why.
-        payoutRepository.save(new Payout(
-                UUID.randomUUID(), experienceId, experience.getContributorId(), contributorPayoutPaise));
+        // RazorpayX transfer — see Payout.java and PayoutService for why. Skipped for a free
+        // (admin "reference a public source") experience — there's no revenue behind it, so
+        // nothing to pay the contributor out of. Free, unreviewed contributions never reach
+        // this method at all (they publish straight from submitForReview), but a reference
+        // submission does still go through review, so this guard is the one place that would
+        // otherwise create a payout for $0 of actual sales.
+        if (!experience.isFree()) {
+            payoutRepository.save(new Payout(
+                    UUID.randomUUID(), experienceId, experience.getContributorId(), contributorPayoutPaise));
+        }
 
         return responseAssembler.toFullResponse(experience);
     }

@@ -75,12 +75,47 @@ public class ExperienceService {
         this.maxPageSize = maxPageSize;
     }
 
+    /**
+     * A non-blank sourceUrl marks this as a "reference a public source" submission —
+     * summarizing/linking to an already-public interview writeup instead of the
+     * contributor's own account. These are admin-only (regular contributors never see this
+     * option — see SubmissionWorkspace.tsx — but the check is enforced here too, not just
+     * hidden in the UI) and always free: no platform price is assigned, and
+     * getPublicView/PurchaseService both treat a free, published experience as open to
+     * everyone, no paywall or entitlement needed. sourceUrl/sourceName are set once here and
+     * are immutable afterward — updateDraft/applyEdits never touches them.
+     * <p>
+     * Separately, req.freeContribution() lets ANY contributor (no admin check) opt their own
+     * write-up into the same free/no-price treatment — but unlike a reference submission, a
+     * free contribution also skips admin review entirely (see submitForReview) rather than
+     * just skipping payment. The two are mutually exclusive; a sourceUrl always wins if both
+     * are somehow set, since that's the admin-only, still-reviewed path.
+     */
     @Transactional
-    public ExperienceFullResponse createDraft(UUID contributorId, ExperienceRequest req) {
+    public ExperienceFullResponse createDraft(UUID contributorId, boolean actorIsAdmin, ExperienceRequest req) {
+        String sourceUrl = blankToNull(req.sourceUrl());
+        String sourceName = blankToNull(req.sourceName());
+        boolean isReference = sourceUrl != null;
+        if (isReference) {
+            if (!actorIsAdmin) {
+                throw new ForbiddenException("Only admins can submit an experience that references a public source");
+            }
+            if (sourceName == null) {
+                throw new InvalidStateException("Source site/platform is required when referencing a public source");
+            }
+        }
+        boolean isFreeContribution = !isReference && req.freeContribution();
+
         Experience experience = new Experience(
                 UUID.randomUUID(), contributorId, req.company(), req.roleTitle(), req.level(), req.location(),
                 req.isRemote(), req.interviewMonth(), req.interviewYear(), req.outcome(), req.teaser(),
-                req.prepAdvice(), req.overallDifficulty(), req.timeline(), req.compensation(), defaultPricePaise);
+                req.prepAdvice(), req.overallDifficulty(), req.timeline(), req.compensation(),
+                (isReference || isFreeContribution) ? 0 : defaultPricePaise);
+        if (isReference) {
+            experience.markAsReference(sourceUrl, sourceName);
+        } else if (isFreeContribution) {
+            experience.markAsFreeContribution();
+        }
         experienceRepository.save(experience);
         return responseAssembler.toFullResponse(experience);
     }
@@ -271,7 +306,14 @@ public class ExperienceService {
 
     /** Works from DRAFT (first submission) or REJECTED (resubmission after fixing what an
      * admin flagged) — either way it lands back in PENDING_REVIEW, and markPendingReview()
-     * clears any stale rejection reason from a prior round. */
+     * clears any stale rejection reason from a prior round.
+     * <p>
+     * A free contribution (see Experience#isSelfFreeContribution) is the one exception: it
+     * skips PENDING_REVIEW and admin approval entirely and publishes immediately, since
+     * there's no payout or paywall riding on it that would need a human check first. It only
+     * needs at least one round — the proof-document requirement exists for an admin to
+     * verify, and nobody reviews a free contribution, so there's nothing for a proof document
+     * to accomplish there. */
     @Transactional
     public ExperienceFullResponse submitForReview(UUID contributorId, UUID experienceId) {
         Experience experience = getOwned(contributorId, experienceId);
@@ -280,6 +322,13 @@ public class ExperienceService {
         if (roundRepository.countByExperienceId(experienceId) == 0) {
             throw new InvalidStateException("Add at least one interview round before submitting");
         }
+
+        if (experience.isSelfFreeContribution()) {
+            experience.publish();
+            experienceRepository.save(experience);
+            return responseAssembler.toFullResponse(experience);
+        }
+
         if (proofDocumentRepository.countByExperienceId(experienceId) == 0) {
             throw new InvalidStateException("Upload at least one proof document before submitting");
         }
@@ -324,7 +373,7 @@ public class ExperienceService {
                 : new HashSet<>(entitlementRepository.findExperienceIdsByUserIdAndExperienceIdIn(viewerId, ids));
         return PagedResponse.of(
                 result.map(e -> ExperienceTeaserResponse.from(
-                        e, roundCounts.getOrDefault(e.getId(), 0L), unlockedIds.contains(e.getId()))));
+                        e, roundCounts.getOrDefault(e.getId(), 0L), unlockedIds.contains(e.getId()) || e.isFree())));
     }
 
     /**
@@ -350,13 +399,16 @@ public class ExperienceService {
                 && !isOwner
                 && !viewerIsAdmin
                 && entitlementRepository.existsByUserIdAndExperienceId(viewerId, experienceId);
+        // A free (admin-authored reference) experience has no paywall at all once
+        // published — open to any viewer, including guests, same as the teaser already is.
+        boolean freeAndPublished = experience.isFree() && experience.getStatus() == ExperienceStatus.PUBLISHED;
 
         boolean visible = isOwner || viewerIsAdmin || hasPurchased || experience.getStatus() == ExperienceStatus.PUBLISHED;
         if (!visible) {
             throw new NotFoundException("Experience not found");
         }
 
-        if (isOwner || viewerIsAdmin || hasPurchased) {
+        if (isOwner || viewerIsAdmin || hasPurchased || freeAndPublished) {
             return ExperienceViewResponse.fullAccess(responseAssembler.toFullResponse(experience));
         }
         // Reaching this branch means hasPurchased was false (otherwise we'd be in the

@@ -49,7 +49,7 @@ public class ExperienceController {
     @ResponseStatus(HttpStatus.CREATED)
     public ExperienceFullResponse createDraft(
             @AuthenticationPrincipal AuthenticatedUser user, @Valid @RequestBody ExperienceRequest req) {
-        return experienceService.createDraft(user.id(), req);
+        return experienceService.createDraft(user.id(), user.admin(), req);
     }
 
     @PutMapping("/{id}")

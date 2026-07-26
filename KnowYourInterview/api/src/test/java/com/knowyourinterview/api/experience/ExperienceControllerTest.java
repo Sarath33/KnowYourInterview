@@ -55,7 +55,8 @@ class ExperienceControllerTest {
         return new ExperienceFullResponse(
                 UUID.randomUUID(), contributorId, "Acme", "Backend Engineer", "L4", "Remote", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop, focus on systems design.",
-                9900, 0, null, ExperienceStatus.DRAFT, null, null, null, null, null, 0, List.of(), List.of(), true);
+                9900, 0, null, ExperienceStatus.DRAFT, null, null, null, null, null, 0, List.of(), List.of(), true,
+                false, null, null);
     }
 
     @Test
@@ -79,7 +80,8 @@ class ExperienceControllerTest {
     @Test
     void createDraftReturns201WhenAuthenticated() throws Exception {
         UUID contributorId = UUID.randomUUID();
-        when(experienceService.createDraft(eq(contributorId), any())).thenReturn(sampleFullResponse(contributorId));
+        when(experienceService.createDraft(eq(contributorId), eq(false), any()))
+                .thenReturn(sampleFullResponse(contributorId));
 
         mockMvc.perform(post("/api/v1/experiences")
                         .header("Authorization", bearerTokenFor(contributorId))
@@ -97,7 +99,8 @@ class ExperienceControllerTest {
     void browseIsPublic() throws Exception {
         ExperienceTeaserResponse teaser = new ExperienceTeaserResponse(
                 UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Remote", true,
-                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, 4, Instant.now(), false);
+                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, 4, Instant.now(), false,
+                false, null, null);
         when(experienceService.browsePublished(
                         any(), any(), any(), any(), any(), any(), any(),
                         org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
@@ -113,7 +116,8 @@ class ExperienceControllerTest {
         UUID id = UUID.randomUUID();
         ExperienceTeaserResponse teaser = new ExperienceTeaserResponse(
                 id, "Acme", "Backend Engineer", "L4", "Remote", true,
-                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, 4, Instant.now(), false);
+                (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, 4, Instant.now(), false,
+                false, null, null);
         when(experienceService.getPublicView(isNull(), eq(false), eq(id)))
                 .thenReturn(ExperienceViewResponse.teaserOnly(teaser));
 

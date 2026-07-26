@@ -94,6 +94,19 @@ class PurchaseServiceTest {
     }
 
     @Test
+    void createOrderRejectsFreeExperience() {
+        Experience experience = publishedExperience();
+        experience.markAsReference("https://example.com/writeup", "Example Blog");
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        assertThatThrownBy(() -> service.createOrder(UUID.randomUUID(), experience.getId()))
+                .isInstanceOf(InvalidStateException.class)
+                .hasMessageContaining("free");
+
+        verify(purchaseRepository, never()).save(any());
+    }
+
+    @Test
     void createOrderRejectsWhenViewerAlreadyHasEntitlement() {
         Experience experience = publishedExperience();
         UUID userId = UUID.randomUUID();

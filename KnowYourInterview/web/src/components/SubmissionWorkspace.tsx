@@ -13,6 +13,7 @@ import { StatusTag } from "./tags";
 import { FileTextIcon, PlusIcon } from "./icons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useDraftAutosave } from "../lib/useDraftAutosave";
+import { useAuth } from "../context/AuthContext";
 
 const OUTCOMES: ExperienceOutcome[] = ["OFFER", "REJECTED", "WITHDRAWN"];
 
@@ -715,11 +716,20 @@ function EditHistoryEntry({ snapshot }: { snapshot: ExperienceEditSnapshot }) {
 }
 
 export function SubmissionWorkspace() {
+  const { user } = useAuth();
   const [experiences, setExperiences] = useState<ExperienceFull[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<ExperienceRequest>(emptyForm);
+  // Admin-only — regular contributors never see the toggle that sets this. See
+  // ExperienceService#createDraft on the backend, which enforces the same restriction
+  // rather than trusting this UI gate alone.
+  const [isReference, setIsReference] = useState(false);
+  // Open to every contributor — marks the draft as a free, unreviewed submission. Mutually
+  // exclusive with isReference (only relevant for admins); the checkbox for this is hidden
+  // while isReference is on. See ExperienceService#createDraft/#submitForReview.
+  const [freeContribution, setFreeContribution] = useState(false);
   const [pendingRounds, setPendingRounds] = useState<RoundRequest[]>([]);
   const [editingPendingIndex, setEditingPendingIndex] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -766,8 +776,17 @@ export function SubmissionWorkspace() {
       setError("Company, role, and teaser are required.");
       return;
     }
+    if (isReference && (!form.sourceUrl?.trim() || !form.sourceName?.trim())) {
+      setError("Source URL and source site/platform are required when referencing a public source.");
+      return;
+    }
+    // Not a reference submission — never send stale sourceUrl/sourceName from a toggle
+    // that got flipped back after they were filled in.
+    const body: ExperienceRequest = isReference
+      ? { ...form, freeContribution: false }
+      : { ...form, sourceUrl: undefined, sourceName: undefined, freeContribution };
     try {
-      const created = await api.createExperience(form);
+      const created = await api.createExperience(body);
       // The draft exists now — add any rounds queued up before creation. If one fails,
       // the draft itself is safe (already saved); surface the error after reloading and
       // still land on the draft so the rest can be added there directly.
@@ -782,6 +801,8 @@ export function SubmissionWorkspace() {
       }
       setForm(emptyForm);
       setPendingRounds([]);
+      setIsReference(false);
+      setFreeContribution(false);
       setCreating(false);
       newDraftAutosave.clear();
       await load();
@@ -830,10 +851,14 @@ export function SubmissionWorkspace() {
                 if (newDraftAutosave.restored) {
                   setForm(newDraftAutosave.restored.value.form);
                   setPendingRounds(newDraftAutosave.restored.value.pendingRounds);
+                  setIsReference(!!newDraftAutosave.restored.value.form.sourceUrl);
+                  setFreeContribution(!!newDraftAutosave.restored.value.form.freeContribution);
                   setShowRestoredNotice(true);
                 } else {
                   setForm(emptyForm);
                   setPendingRounds([]);
+                  setIsReference(false);
+                  setFreeContribution(false);
                 }
               }}
               className="btn-dashed"
@@ -855,7 +880,11 @@ export function SubmissionWorkspace() {
                   New draft
                 </div>
                 <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 0, marginBottom: 18 }}>
-                  The platform sets the price once it's published — you don't.
+                  {isReference
+                    ? "Reference submissions are always free — no platform price."
+                    : freeContribution
+                      ? "Free contributions skip admin review and platform pricing — it publishes as soon as you submit."
+                      : "The platform sets the price once it's published — you don't."}
                 </p>
                 {showRestoredNotice && newDraftAutosave.restored && (
                   <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: -10, marginBottom: 18 }}>
@@ -866,6 +895,8 @@ export function SubmissionWorkspace() {
                         newDraftAutosave.clear();
                         setForm(emptyForm);
                         setPendingRounds([]);
+                        setIsReference(false);
+                        setFreeContribution(false);
                         setShowRestoredNotice(false);
                       }}
                       className="btn-ghost"
@@ -874,6 +905,70 @@ export function SubmissionWorkspace() {
                       Discard it and start blank
                     </button>
                   </p>
+                )}
+                {!isReference && (
+                  <label className="checkbox-field" style={{ marginBottom: 18 }}>
+                    <input
+                      type="checkbox"
+                      checked={freeContribution}
+                      onChange={(e) => setFreeContribution(e.target.checked)}
+                    />
+                    Contribute this for free — skip admin review, publishes immediately (no proof document needed)
+                  </label>
+                )}
+                {user?.isAdmin && (
+                  <div className="field" style={{ marginBottom: 18 }}>
+                    <span className="field-label">Submission type</span>
+                    <div className="row" style={{ gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => setIsReference(false)}
+                        className={isReference ? "btn btn-outline" : "btn btn-primary"}
+                      >
+                        Original write-up
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsReference(true);
+                          setFreeContribution(false);
+                        }}
+                        className={isReference ? "btn btn-primary" : "btn btn-outline"}
+                      >
+                        Reference a public source
+                      </button>
+                    </div>
+                    {isReference && (
+                      <div className="form-grid-2" style={{ marginTop: 12 }}>
+                        <div className="field">
+                          <label className="field-label" htmlFor="nd-source-url">
+                            Source URL
+                          </label>
+                          <input
+                            id="nd-source-url"
+                            className="text-input"
+                            placeholder="https://…"
+                            value={form.sourceUrl ?? ""}
+                            onChange={(e) => setForm({ ...form, sourceUrl: e.target.value })}
+                            required
+                          />
+                        </div>
+                        <div className="field">
+                          <label className="field-label" htmlFor="nd-source-name">
+                            Source site / platform
+                          </label>
+                          <input
+                            id="nd-source-name"
+                            className="text-input"
+                            placeholder="e.g. Glassdoor, Blind"
+                            value={form.sourceName ?? ""}
+                            onChange={(e) => setForm({ ...form, sourceName: e.target.value })}
+                            required
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
                 <div className="stack-md">
                   <div className="form-grid-2">
@@ -1065,6 +1160,12 @@ function SubmissionDetail({
   // Deleting isn't narrower any more — it shares isContentEditable's window below, so a
   // contributor can withdraw a submission before an admin has acted on it too.
   const isDraftOrRejected = experience.status === "DRAFT" || experience.status === "REJECTED";
+  // A free experience with no sourceUrl is the contributor's own free contribution — it
+  // skips admin review entirely (see backend ExperienceService#submitForReview). A free
+  // experience WITH a sourceUrl is an admin "reference a public source" submission, which
+  // still goes through the normal review pipeline — only the price is different for that
+  // one. Mirrors Experience#isSelfFreeContribution on the backend.
+  const isSelfFreeContribution = experience.isFree && !experience.sourceUrl;
 
   const handleAddRound = async (round: RoundRequest) => {
     await api.addRound(experience.id, round);
@@ -1247,9 +1348,11 @@ function SubmissionDetail({
       <div className="row" style={{ margin: "10px 0 18px" }}>
         <StatusTag status={experience.status} />
         <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-          {experience.status === "PUBLISHED" || experience.status === "APPROVED"
-            ? `₹${(experience.pricePaise / 100).toFixed(2)} to viewers`
-            : "Price is set by the platform on publish"}
+          {experience.isFree
+            ? "Free for everyone"
+            : experience.status === "PUBLISHED" || experience.status === "APPROVED"
+              ? `₹${(experience.pricePaise / 100).toFixed(2)} to viewers`
+              : "Price is set by the platform on publish"}
         </span>
         {!!experience.publishedAt && (
           <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
@@ -1380,10 +1483,16 @@ function SubmissionDetail({
             {isDraftOrRejected ? (
               <div className="row">
                 <button type="button" onClick={handleSubmit} className="btn btn-primary">
-                  {experience.status === "REJECTED" ? "Resubmit for review" : "Submit for review"}
+                  {isSelfFreeContribution
+                    ? "Publish now"
+                    : experience.status === "REJECTED"
+                      ? "Resubmit for review"
+                      : "Submit for review"}
                 </button>
                 <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                  Needs at least one round and one proof document.
+                  {isSelfFreeContribution
+                    ? "Free contributions skip admin review — this goes live immediately. Needs at least one round."
+                    : "Needs at least one round and one proof document."}
                 </span>
               </div>
             ) : (

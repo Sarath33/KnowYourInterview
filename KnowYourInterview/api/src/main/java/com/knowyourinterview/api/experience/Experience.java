@@ -60,6 +60,20 @@ public class Experience {
     @Column(name = "price_paise", nullable = false)
     private long pricePaise;
 
+    // Set only for admin-authored "reference a public source" submissions — see
+    // ExperienceService#createDraft, which is the only writer of these three fields (they
+    // aren't part of the regular edit form / applyEdits, so they're immutable after
+    // creation). sourceUrl non-null is what makes an experience a "reference" one;
+    // isFree/pricePaise=0 follow automatically from that at creation time.
+    @Column(name = "source_url", length = 2048)
+    private String sourceUrl;
+
+    @Column(name = "source_name")
+    private String sourceName;
+
+    @Column(name = "is_free", nullable = false)
+    private boolean free;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
     private ExperienceStatus status;
@@ -127,6 +141,35 @@ public class Experience {
         Instant now = Instant.now();
         this.createdAt = now;
         this.updatedAt = now;
+    }
+
+    /** Marks a newly-created experience as an admin-authored reference to an already-public
+     * writeup — always free. Called only from ExperienceService#createDraft, right after
+     * construction, when the incoming request has a sourceUrl; never used on an existing
+     * (already-submitted) experience — see ExperienceRequest's Javadoc on why sourceUrl/
+     * sourceName aren't part of the regular edit path. */
+    public void markAsReference(String sourceUrl, String sourceName) {
+        this.sourceUrl = sourceUrl;
+        this.sourceName = sourceName;
+        this.free = true;
+    }
+
+    /** Marks a newly-created experience as a contributor's own free, unreviewed submission —
+     * see ExperienceService#createDraft (sets this when the request opts in) and
+     * #submitForReview (skips PENDING_REVIEW entirely and publishes immediately for these).
+     * Deliberately leaves sourceUrl/sourceName null, which is what distinguishes this from an
+     * admin "reference a public source" submission (also free, but still reviewed normally) —
+     * see isSelfFreeContribution(). */
+    public void markAsFreeContribution() {
+        this.free = true;
+    }
+
+    /** True for a contributor's own free submission that skips admin review — as opposed to
+     * an admin-authored "reference a public source" submission, which is also free but still
+     * goes through the normal review pipeline. The two are told apart by sourceUrl: a
+     * reference submission always has one, a self free-contribution never does. */
+    public boolean isSelfFreeContribution() {
+        return free && sourceUrl == null;
     }
 
     public void applyEdits(
@@ -252,6 +295,18 @@ public class Experience {
 
     public long getPricePaise() {
         return pricePaise;
+    }
+
+    public String getSourceUrl() {
+        return sourceUrl;
+    }
+
+    public String getSourceName() {
+        return sourceName;
+    }
+
+    public boolean isFree() {
+        return free;
     }
 
     public ExperienceStatus getStatus() {

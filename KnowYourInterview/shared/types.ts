@@ -54,8 +54,16 @@ export interface ExperienceTeaser {
   publishedAt?: ISODateTime;
   /** True if the current viewer already holds a paid entitlement for this experience.
    * Always false for a guest (no token sent). On ExperienceFull (which extends this) it's
-   * always true — reaching a full response at all implies access. */
+   * always true — reaching a full response at all implies access. Also always true for a
+   * free (isFree) experience — see the backend's getPublicView, which grants everyone
+   * full access to those with no entitlement needed. */
   unlocked: boolean;
+  /** Admin-authored "reference a public source" experiences are always free — no paywall,
+   * pricePaise is 0/not meaningful. See ExperienceRequest.sourceUrl. Optional/undefined is
+   * treated the same as false everywhere it's read. */
+  isFree?: boolean;
+  sourceUrl?: string;
+  sourceName?: string;
 }
 
 export interface ExperienceFull extends ExperienceTeaser {
@@ -113,6 +121,18 @@ export interface ExperienceRequest {
   overallDifficulty?: number; // 1-5
   timeline?: string;
   compensation?: string;
+  /** Admin-only — see backend ExperienceService#createDraft. Setting sourceUrl marks this
+   * as a "reference a public source" submission: forced free, no platform price. Ignored
+   * (not persisted) on an edit — only meaningful at creation. sourceName is required
+   * whenever sourceUrl is set. */
+  sourceUrl?: string;
+  sourceName?: string;
+  /** Open to any contributor, unlike sourceUrl above. Marks this as the contributor's own
+   * free submission: forced free (no platform price) AND skips admin review entirely —
+   * it publishes as soon as it's submitted, needing only at least one round (no proof
+   * document required, since nobody reviews it). Ignored on an edit, same as sourceUrl/
+   * sourceName. Mutually exclusive with sourceUrl — a sourceUrl always wins if both are set. */
+  freeContribution?: boolean;
 }
 
 export interface RoundRequest {

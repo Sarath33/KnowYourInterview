@@ -191,7 +191,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
                     <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{recency}</div>
                   )}
                   <div className="browse-card-footer">
-                    <span className="price-tag">{formatPaise(exp.pricePaise)}</span>
+                    <span className="price-tag">{exp.isFree ? "Free" : formatPaise(exp.pricePaise)}</span>
                     <button type="button" onClick={() => onSelect(exp.id)} className="btn btn-outline btn-outline-accent">
                       View
                       <ArrowRightIcon />
