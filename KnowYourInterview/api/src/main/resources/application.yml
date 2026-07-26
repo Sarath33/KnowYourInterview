@@ -98,6 +98,12 @@ app:
     key-id: ${RAZORPAY_KEY_ID:}
     key-secret: ${RAZORPAY_KEY_SECRET:}
     webhook-secret: ${RAZORPAY_WEBHOOK_SECRET:}
+  google:
+    # Blank = "Sign in with Google" is disabled (POST /api/v1/auth/google returns 503) —
+    # same graceful-degradation pattern as Razorpay above. Set to the Web application OAuth
+    # Client ID from Google Cloud Console (ends in .apps.googleusercontent.com). See
+    # docs/06-deployment.md for how to create one.
+    client-id: ${GOOGLE_CLIENT_ID:}
 
 # Error tracking (sentry.io). Blank DSN = the Sentry Spring Boot starter quietly
 # no-ops (no crashes, no events sent) — same pattern as the Razorpay keys above. Create

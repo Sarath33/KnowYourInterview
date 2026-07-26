@@ -39,6 +39,7 @@ public class AuthService {
     private final JwtService jwtService;
     private final StringRedisTemplate redisTemplate;
     private final Duration passwordResetTtl;
+    private final GoogleIdTokenVerifierPort googleIdTokenVerifierPort;
 
     public AuthService(
             UserRepository userRepository,
@@ -46,13 +47,15 @@ public class AuthService {
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             StringRedisTemplate redisTemplate,
-            @Value("${app.password-reset.token-ttl-minutes}") long passwordResetTtlMinutes) {
+            @Value("${app.password-reset.token-ttl-minutes}") long passwordResetTtlMinutes,
+            GoogleIdTokenVerifierPort googleIdTokenVerifierPort) {
         this.userRepository = userRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.redisTemplate = redisTemplate;
         this.passwordResetTtl = Duration.ofMinutes(passwordResetTtlMinutes);
+        this.googleIdTokenVerifierPort = googleIdTokenVerifierPort;
     }
 
     @Transactional
@@ -68,9 +71,38 @@ public class AuthService {
     public AuthResponse login(String email, String rawPassword) {
         User user = userRepository.findByEmailIgnoreCase(email)
                 .orElseThrow(InvalidCredentialsException::new);
-        if (!passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
+        // Google-only accounts have no password_hash — reject rather than NPE on matches().
+        if (user.getPasswordHash() == null || !passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
             throw new InvalidCredentialsException();
         }
+        return issueTokens(user);
+    }
+
+    /**
+     * Handles both signup and login for "Sign in with Google" in one call, mirroring how
+     * Google Identity Services itself doesn't distinguish the two. Resolution order:
+     * 1) an account already linked to this Google subject id — plain login;
+     * 2) an existing email/password account with the same verified email — link it, so a
+     *    user who registered normally can start using Google without ending up with two
+     *    accounts;
+     * 3) neither — create a new, password-less account.
+     */
+    @Transactional
+    public AuthResponse googleLogin(String idTokenString) {
+        GoogleUserInfo googleUser = googleIdTokenVerifierPort.verify(idTokenString);
+
+        User user = userRepository.findByGoogleSub(googleUser.subject()).orElse(null);
+        if (user == null) {
+            user = userRepository.findByEmailIgnoreCase(googleUser.email()).orElse(null);
+            if (user != null) {
+                user.linkGoogleSub(googleUser.subject());
+            } else {
+                user = User.forGoogleSignup(
+                        UUID.randomUUID(), googleUser.email(), googleUser.name(), googleUser.subject());
+            }
+            userRepository.save(user);
+        }
+
         return issueTokens(user);
     }
 

@@ -241,6 +241,10 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface GoogleLoginRequest {
+  idToken: string;
+}
+
 export interface AuthResponse {
   accessToken: string;
   refreshToken: string;

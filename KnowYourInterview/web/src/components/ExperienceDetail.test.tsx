@@ -22,6 +22,7 @@ function stubAuth(overrides: Partial<ReturnType<typeof useAuth>> = {}) {
     isAuthenticated: false,
     register: vi.fn(),
     login: vi.fn(),
+    googleLogin: vi.fn(),
     logout: vi.fn(),
     ...overrides,
   });

@@ -20,6 +20,7 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import com.knowyourinterview.api.auth.EmailAlreadyRegisteredException;
+import com.knowyourinterview.api.auth.GoogleAuthNotConfiguredException;
 import com.knowyourinterview.api.auth.InvalidCredentialsException;
 import com.knowyourinterview.api.auth.InvalidTokenException;
 
@@ -50,6 +51,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(InvalidTokenException.class)
     public ResponseEntity<Map<String, Object>> handleInvalidToken(InvalidTokenException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body(HttpStatus.UNAUTHORIZED, ex.getMessage(), null));
+    }
+
+    @ExceptionHandler(GoogleAuthNotConfiguredException.class)
+    public ResponseEntity<Map<String, Object>> handleGoogleAuthNotConfigured(GoogleAuthNotConfiguredException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(body(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), null));
     }
 
     @ExceptionHandler(NotFoundException.class)

@@ -2,6 +2,7 @@ import type {
   HealthResponse,
   RegisterRequest,
   LoginRequest,
+  GoogleLoginRequest,
   AuthResponse,
   ApiErrorBody,
   ExperienceRequest,
@@ -150,6 +151,14 @@ export async function register(body: RegisterRequest): Promise<AuthResponse> {
 export async function login(body: LoginRequest): Promise<AuthResponse> {
   return request<AuthResponse>(
     "/api/v1/auth/login",
+    { method: "POST", body: JSON.stringify(body) },
+    { skipAuthRefresh: true },
+  );
+}
+
+export async function googleLogin(body: GoogleLoginRequest): Promise<AuthResponse> {
+  return request<AuthResponse>(
+    "/api/v1/auth/google",
     { method: "POST", body: JSON.stringify(body) },
     { skipAuthRefresh: true },
   );

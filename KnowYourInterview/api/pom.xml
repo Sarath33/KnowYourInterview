@@ -77,6 +77,19 @@
             <version>8.43.0</version>
         </dependency>
 
+        <!-- Google Sign-In: verifies the ID token (JWT) a client gets back from Google
+             Identity Services against Google's published JWKS — signature, issuer,
+             audience (our OAuth Client ID) and expiry all checked locally, no network
+             round-trip per login. Used by AuthService.googleLogin via GoogleIdTokenVerifier
+             (com.google.api.client.googleapis.auth.oauth2). Deliberately not the
+             tokeninfo-endpoint approach (https://oauth2.googleapis.com/tokeninfo) — Google's
+             own docs say that's rate-limited and unsuitable for production traffic. -->
+        <dependency>
+            <groupId>com.google.api-client</groupId>
+            <artifactId>google-api-client</artifactId>
+            <version>2.7.0</version>
+        </dependency>
+
         <!-- JWT -->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

@@ -10,6 +10,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   register: (email: string, password: string, displayName: string) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
+  googleLogin: (idToken: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -106,6 +107,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applyTokens],
   );
 
+  const googleLogin = useCallback(
+    async (idToken: string) => {
+      applyTokens(await api.googleLogin({ idToken }));
+    },
+    [applyTokens],
+  );
+
   const logout = useCallback(async () => {
     if (refreshToken) {
       try {
@@ -118,8 +126,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshToken, clear]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, accessToken, isAuthenticated: !!user, register, login, logout }),
-    [user, accessToken, register, login, logout],
+    () => ({ user, accessToken, isAuthenticated: !!user, register, login, googleLogin, logout }),
+    [user, accessToken, register, login, googleLogin, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

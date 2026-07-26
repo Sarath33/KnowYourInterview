@@ -4,9 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { AuthForms } from "./AuthForms";
 import { useAuth } from "../context/AuthContext";
 
-// AuthForms only reads `login`/`register` off useAuth(), but the hook's return type
-// requires the full shape — mocking the whole module keeps the test focused on
-// AuthForms' own logic (mode switching, submit wiring, error rendering) without
+// AuthForms only reads `login`/`register`/`googleLogin` off useAuth(), but the hook's
+// return type requires the full shape — mocking the whole module keeps the test focused
+// on AuthForms' own logic (mode switching, submit wiring, error rendering) without
 // needing a real AuthProvider or network calls.
 vi.mock("../context/AuthContext", () => ({
   useAuth: vi.fn(),
@@ -21,6 +21,7 @@ function stubAuth(overrides: Partial<ReturnType<typeof useAuth>> = {}) {
     isAuthenticated: false,
     register: vi.fn(),
     login: vi.fn(),
+    googleLogin: vi.fn(),
     logout: vi.fn(),
     ...overrides,
   });

@@ -79,6 +79,31 @@ class AuthControllerTest {
     }
 
     @Test
+    void googleReturns200WithTokens() throws Exception {
+        when(authService.googleLogin(anyString())).thenReturn(sampleAuthResponse());
+
+        mockMvc.perform(post("/api/v1/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"idToken":"a-google-id-token"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").value("access-token"));
+    }
+
+    @Test
+    void googleReturns503WhenNotConfigured() throws Exception {
+        when(authService.googleLogin(anyString())).thenThrow(new GoogleAuthNotConfiguredException());
+
+        mockMvc.perform(post("/api/v1/auth/google")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"idToken":"a-google-id-token"}
+                                """))
+                .andExpect(status().isServiceUnavailable());
+    }
+
+    @Test
     void loginReturns401OnBadCredentials() throws Exception {
         when(authService.login(anyString(), anyString())).thenThrow(new InvalidCredentialsException());
 

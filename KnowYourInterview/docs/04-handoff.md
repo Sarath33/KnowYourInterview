@@ -123,8 +123,8 @@ UPDATE users SET is_admin = true WHERE email = 'you@example.com';
   - Spring Security's default response headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, cache-control on sensitive responses, HSTS when served over HTTPS) are active — `SecurityConfig` never calls `.headers(...)` to disable them, so Spring Security's sane defaults stand.
   - All queries go through JPA/JPQL with bound parameters (no string-concatenated SQL anywhere), so standard SQL injection isn't a live concern.
   - Passwords are BCrypt-hashed (`PasswordEncoder` bean in `SecurityConfig`, Phase 2).
-  - **One action item for when this deploys**: `corsConfigurationSource()` in `SecurityConfig` currently allows `http://localhost:*` / `http://127.0.0.1:*` only — correct for local dev, but needs updating to the real deployed frontend origin(s) before this is useful anywhere else. There's a comment marking the spot.
-  - **Another action item for when this deploys**: the frontend now uses real History-API routing (`web/src/lib/router.tsx` — every screen is a URL like `/browse/:id`, not just app state), added so the browser's Back/Forward buttons and shared links actually work instead of Back exiting the app entirely. Vite's dev server already serves `index.html` for any unmatched path, so this works out of the box locally. Whatever serves the built `web/dist` in production (Phase 6-8 AWS deploy) needs an SPA-fallback rule — serve `index.html` for any path that isn't a real static asset or an `/api/...` route — or a hard refresh/direct link on anything other than `/` will 404 before React ever loads.
+  - ~~**One action item for when this deploys**: `corsConfigurationSource()`...~~ — **done**, `CORS_ALLOWED_ORIGINS` is now env-var driven (see `docs/06-deployment.md`).
+  - ~~**Another action item for when this deploys**: ...SPA-fallback rule...~~ — **done**, `web/nginx.conf` handles it (see `docs/06-deployment.md`).
 
 ### Known gaps worth knowing about (Phase 5)
 
@@ -150,9 +150,14 @@ UPDATE users SET is_admin = true WHERE email = 'you@example.com';
 3. **Proof documents are sensitive PII** — store privately, encrypt, restrict to admins, define retention/deletion.
 4. **Cold-start** — seed initial content; pick a launch niche (e.g. SWE at big tech) first.
 
+## Deployment (2026-07-26)
+
+The app is live on Railway — web and api are both deployed, connected to real Postgres/Redis, and smoke-tested. Full details (URLs, env vars, volumes, gotchas hit during setup, known gaps) are in `docs/06-deployment.md`. Razorpay isn't configured yet in the deployed environment, so the unlock-purchase flow will error until keys are added there.
+
 ## Reference docs
 
 - `01-build-roadmap.md` — full prerequisites + 8-phase roadmap.
 - `02-phase0-design.md` — PRD, data model/ERD, flows, full MVP API contract, scope in/out, risks.
 - `03-setup-guide.md` — fresh-machine setup + first run.
 - `04-handoff.md` — this file.
+- `06-deployment.md` — live Railway deployment: URLs, env vars, volumes, gotchas, known gaps.

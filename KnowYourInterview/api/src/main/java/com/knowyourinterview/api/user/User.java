@@ -18,11 +18,20 @@ public class User {
     @Column(nullable = false, unique = true)
     private String email;
 
-    @Column(name = "password_hash", nullable = false)
+    // Nullable: accounts created via Google Sign-In never get a password. Password-based
+    // login (AuthService.login) rejects any user with a null hash before it ever reaches
+    // passwordEncoder.matches (which would otherwise NPE on it).
+    @Column(name = "password_hash")
     private String passwordHash;
 
     @Column(name = "display_name", nullable = false)
     private String displayName;
+
+    // Google's stable per-account subject id (the ID token's "sub" claim). Null for
+    // accounts that have never signed in with Google. Unique when present — see
+    // V2__add_google_auth.sql.
+    @Column(name = "google_sub", unique = true)
+    private String googleSub;
 
     @Column(name = "is_admin", nullable = false)
     private boolean admin;
@@ -48,6 +57,13 @@ public class User {
         this.updatedAt = now;
     }
 
+    /** Google Sign-In signup: no password_hash — googleSub is the only credential. */
+    public static User forGoogleSignup(UUID id, String email, String displayName, String googleSub) {
+        User user = new User(id, email, null, displayName);
+        user.googleSub = googleSub;
+        return user;
+    }
+
     public UUID getId() {
         return id;
     }
@@ -71,6 +87,17 @@ public class User {
 
     public boolean isAdmin() {
         return admin;
+    }
+
+    public String getGoogleSub() {
+        return googleSub;
+    }
+
+    /** Links an existing (previously email/password-only) account to a Google account the
+     * first time its owner uses "Sign in with Google" with a matching, verified email. */
+    public void linkGoogleSub(String googleSub) {
+        this.googleSub = googleSub;
+        this.updatedAt = Instant.now();
     }
 
     public Instant getCreatedAt() {

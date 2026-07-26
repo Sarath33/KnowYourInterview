@@ -2,10 +2,21 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { useAuth } from "../context/AuthContext";
 import { errorMessage } from "../lib/errors";
+import { GoogleSignInButton } from "./GoogleSignInButton";
 
 export function AuthForms({ onGuestBrowse }: { onGuestBrowse: () => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
-  const { login, register } = useAuth();
+  const { login, register, googleLogin } = useAuth();
+  const [googleError, setGoogleError] = useState<string | null>(null);
+
+  const handleGoogleCredential = async (idToken: string) => {
+    setGoogleError(null);
+    try {
+      await googleLogin(idToken);
+    } catch (err) {
+      setGoogleError(errorMessage(err));
+    }
+  };
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -143,6 +154,10 @@ export function AuthForms({ onGuestBrowse }: { onGuestBrowse: () => void }) {
             {submitting ? "Please wait…" : mode === "login" ? "Log in" : "Create account"}
           </button>
         </form>
+
+        <div className="divider" />
+        {googleError && <p className="error-text">{googleError}</p>}
+        <GoogleSignInButton onCredential={handleGoogleCredential} />
 
         <div className="divider" />
         <button type="button" onClick={onGuestBrowse} className="btn btn-outline btn-block">

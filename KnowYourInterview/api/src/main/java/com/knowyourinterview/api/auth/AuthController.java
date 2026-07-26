@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.knowyourinterview.api.auth.dto.AuthResponse;
 import com.knowyourinterview.api.auth.dto.ForgotPasswordRequest;
+import com.knowyourinterview.api.auth.dto.GoogleLoginRequest;
 import com.knowyourinterview.api.auth.dto.LoginRequest;
 import com.knowyourinterview.api.auth.dto.LogoutRequest;
 import com.knowyourinterview.api.auth.dto.MessageResponse;
@@ -38,6 +39,13 @@ public class AuthController {
     @PostMapping("/login")
     public AuthResponse login(@Valid @RequestBody LoginRequest request) {
         return authService.login(request.email(), request.password());
+    }
+
+    // Alongside, not instead of, email/password — sign-up-or-login-in-one-step, same as
+    // register/login above return an AuthResponse either way. See AuthService.googleLogin.
+    @PostMapping("/google")
+    public AuthResponse google(@Valid @RequestBody GoogleLoginRequest request) {
+        return authService.googleLogin(request.idToken());
     }
 
     @PostMapping("/refresh")

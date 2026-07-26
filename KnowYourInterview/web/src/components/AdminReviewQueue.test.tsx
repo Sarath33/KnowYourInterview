@@ -44,6 +44,7 @@ describe("AdminReviewQueue", () => {
       isAuthenticated: true,
       register: vi.fn(),
       login: vi.fn(),
+      googleLogin: vi.fn(),
       logout: vi.fn(),
     });
     mockedApi.adminReviewQueue.mockReset();

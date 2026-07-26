@@ -55,6 +55,8 @@ class AuthServiceTest {
     private StringRedisTemplate redisTemplate;
     @Mock
     private ValueOperations<String, String> valueOperations;
+    @Mock
+    private GoogleIdTokenVerifierPort googleIdTokenVerifierPort;
 
     private AuthService authService;
 
@@ -66,7 +68,8 @@ class AuthServiceTest {
                 passwordEncoder,
                 jwtService,
                 redisTemplate,
-                PASSWORD_RESET_TTL_MINUTES);
+                PASSWORD_RESET_TTL_MINUTES,
+                googleIdTokenVerifierPort);
     }
 
     private void stubTokenIssuance() {
@@ -137,6 +140,56 @@ class AuthServiceTest {
 
         assertThatThrownBy(() -> authService.login("jane@example.com", "wrong"))
                 .isInstanceOf(InvalidCredentialsException.class);
+    }
+
+    @Test
+    void googleLoginCreatesPasswordlessAccountForNewGoogleUser() {
+        when(googleIdTokenVerifierPort.verify("id-token"))
+                .thenReturn(new GoogleUserInfo("google-sub-1", "new@example.com", "New Person"));
+        when(userRepository.findByGoogleSub("google-sub-1")).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase("new@example.com")).thenReturn(Optional.empty());
+        stubTokenIssuance();
+
+        AuthResponse response = authService.googleLogin("id-token");
+
+        assertThat(response.user().email()).isEqualTo("new@example.com");
+        assertThat(response.user().displayName()).isEqualTo("New Person");
+
+        ArgumentCaptor<User> savedUser = ArgumentCaptor.forClass(User.class);
+        verify(userRepository).save(savedUser.capture());
+        assertThat(savedUser.getValue().getPasswordHash()).isNull();
+        assertThat(savedUser.getValue().getGoogleSub()).isEqualTo("google-sub-1");
+    }
+
+    @Test
+    void googleLoginLinksGoogleSubToExistingEmailPasswordAccount() {
+        User existing = new User(UUID.randomUUID(), "jane@example.com", "hashed-pw", "Jane");
+        when(googleIdTokenVerifierPort.verify("id-token"))
+                .thenReturn(new GoogleUserInfo("google-sub-2", "jane@example.com", "Jane"));
+        when(userRepository.findByGoogleSub("google-sub-2")).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase("jane@example.com")).thenReturn(Optional.of(existing));
+        stubTokenIssuance();
+
+        authService.googleLogin("id-token");
+
+        assertThat(existing.getGoogleSub()).isEqualTo("google-sub-2");
+        // Password hash untouched — still logs in with the old password too.
+        assertThat(existing.getPasswordHash()).isEqualTo("hashed-pw");
+        verify(userRepository).save(existing);
+    }
+
+    @Test
+    void googleLoginReturningUserSkipsAccountCreation() {
+        User existing = User.forGoogleSignup(UUID.randomUUID(), "returning@example.com", "Returning", "google-sub-3");
+        when(googleIdTokenVerifierPort.verify("id-token"))
+                .thenReturn(new GoogleUserInfo("google-sub-3", "returning@example.com", "Returning"));
+        when(userRepository.findByGoogleSub("google-sub-3")).thenReturn(Optional.of(existing));
+        stubTokenIssuance();
+
+        AuthResponse response = authService.googleLogin("id-token");
+
+        assertThat(response.user().email()).isEqualTo("returning@example.com");
+        verify(userRepository, never()).save(any());
     }
 
     @Test
