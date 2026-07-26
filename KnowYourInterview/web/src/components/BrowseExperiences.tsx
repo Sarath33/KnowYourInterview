@@ -1,17 +1,13 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
-import type { ExperienceTeaser } from "../../../shared/types";
 import * as api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { useAsync } from "../lib/useAsync";
 import { OutcomeTag, RemoteTag, UnlockedTag } from "./tags";
 import { ArrowRightIcon } from "./icons";
-import { interviewedLabel, roundCountLabel } from "../lib/format";
+import { formatPaise, interviewedLabel, levelLine, roundCountLabel } from "../lib/format";
 
 const PAGE_SIZE = 20;
-
-function levelLine(exp: ExperienceTeaser): string {
-  return [exp.level, exp.location].filter(Boolean).join(" · ") || "—";
-}
 
 interface Filters {
   company: string;
@@ -33,66 +29,46 @@ const SORT_LABELS: Record<SortOption, string> = {
 
 export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: string) => void }) {
   const { accessToken } = useAuth();
-  const [items, setItems] = useState<ExperienceTeaser[]>([]);
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(emptyFilters);
   const [sort, setSort] = useState<SortOption>("newest");
   const [page, setPage] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
-  const [totalItems, setTotalItems] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  const load = async (f: Filters, p: number, s: SortOption) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api.browseExperiences(
-        {
-          company: f.company || undefined,
-          roleTitle: f.roleTitle || undefined,
-          level: f.level || undefined,
-          year: f.year ? Number(f.year) : undefined,
-          search: f.search || undefined,
-          sort: s,
-          page: p,
-          size: PAGE_SIZE,
-        },
-        // Guests get every card back with unlocked: false; a signed-in token lets the
-        // backend flag which of these results they've already paid for.
-        accessToken ?? undefined,
-      );
-      setItems(result.items);
-      setTotalPages(result.totalPages);
-      setTotalItems(result.totalItems);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoading(false);
-    }
-  };
+  // The applied filters / page / sort (and the token, so results re-flag unlocked cards on
+  // sign-in) drive the fetch. useAsync tags each run so a slow earlier page can't overwrite
+  // a newer one — the out-of-order race the manual load() had.
+  const { data, loading, error } = useAsync(
+    () =>
+      api.browseExperiences({
+        company: appliedFilters.company || undefined,
+        roleTitle: appliedFilters.roleTitle || undefined,
+        level: appliedFilters.level || undefined,
+        year: appliedFilters.year ? Number(appliedFilters.year) : undefined,
+        search: appliedFilters.search || undefined,
+        sort,
+        page,
+        size: PAGE_SIZE,
+      }),
+    [appliedFilters, sort, page, accessToken],
+  );
 
-  useEffect(() => {
-    load(emptyFilters, 0, "newest");
-  }, []);
+  const items = data?.items ?? [];
+  const totalPages = data?.totalPages ?? 0;
+  const totalItems = data?.totalItems ?? 0;
 
   const handleFilter = (e: FormEvent) => {
     e.preventDefault();
     setAppliedFilters(filters);
     setPage(0);
-    load(filters, 0, sort);
   };
 
-  const handleSortChange = (next: SortOption) => {
-    setSort(next);
+  const clearFilters = () => {
+    setFilters(emptyFilters);
+    setAppliedFilters(emptyFilters);
     setPage(0);
-    load(appliedFilters, 0, next);
   };
 
-  const goToPage = (p: number) => {
-    setPage(p);
-    load(appliedFilters, p, sort);
-  };
+  const hasFilters = filters.company || filters.roleTitle || filters.level || filters.year || filters.search;
 
   return (
     <div>
@@ -118,7 +94,10 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
             id="sort-select"
             className="select"
             value={sort}
-            onChange={(e) => handleSortChange(e.target.value as SortOption)}
+            onChange={(e) => {
+              setSort(e.target.value as SortOption);
+              setPage(0);
+            }}
           >
             {(Object.keys(SORT_LABELS) as SortOption[]).map((s) => (
               <option key={s} value={s}>
@@ -131,6 +110,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
 
       <form onSubmit={handleFilter} className="row" style={{ marginBottom: 24, gap: 10 }}>
         <input
+          aria-label="Search company, role, or teaser"
           placeholder="Search company, role, or teaser…"
           value={filters.search}
           onChange={(e) => setFilters({ ...filters, search: e.target.value })}
@@ -138,6 +118,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
           style={{ width: 260 }}
         />
         <input
+          aria-label="Company"
           placeholder="Company"
           value={filters.company}
           onChange={(e) => setFilters({ ...filters, company: e.target.value })}
@@ -145,6 +126,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
           style={{ width: 180 }}
         />
         <input
+          aria-label="Role title"
           placeholder="Role title"
           value={filters.roleTitle}
           onChange={(e) => setFilters({ ...filters, roleTitle: e.target.value })}
@@ -152,6 +134,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
           style={{ width: 180 }}
         />
         <input
+          aria-label="Level (e.g. L4)"
           placeholder="Level (e.g. L4)"
           value={filters.level}
           onChange={(e) => setFilters({ ...filters, level: e.target.value })}
@@ -159,6 +142,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
           style={{ width: 140 }}
         />
         <input
+          aria-label="Year"
           placeholder="Year"
           type="number"
           value={filters.year}
@@ -169,17 +153,8 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
         <button type="submit" className="btn btn-outline">
           Filter
         </button>
-        {(filters.company || filters.roleTitle || filters.level || filters.year || filters.search) && (
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={() => {
-              setFilters(emptyFilters);
-              setAppliedFilters(emptyFilters);
-              setPage(0);
-              load(emptyFilters, 0, sort);
-            }}
-          >
+        {hasFilters && (
+          <button type="button" className="btn-ghost" onClick={clearFilters}>
             Clear
           </button>
         )}
@@ -187,7 +162,9 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
 
       {error && <p className="error-text">{error}</p>}
       {loading ? (
-        <p className="muted">Loading…</p>
+        <p className="muted" aria-busy="true" aria-live="polite">
+          Loading…
+        </p>
       ) : items.length === 0 ? (
         <p className="muted">Nothing published matches that filter yet.</p>
       ) : (
@@ -214,7 +191,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
                     <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{recency}</div>
                   )}
                   <div className="browse-card-footer">
-                    <span className="price-tag">₹{(exp.pricePaise / 100).toFixed(2)}</span>
+                    <span className="price-tag">{formatPaise(exp.pricePaise)}</span>
                     <button type="button" onClick={() => onSelect(exp.id)} className="btn btn-outline btn-outline-accent">
                       View
                       <ArrowRightIcon />
@@ -231,7 +208,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
                 type="button"
                 className="btn btn-outline"
                 disabled={page === 0}
-                onClick={() => goToPage(page - 1)}
+                onClick={() => setPage(page - 1)}
               >
                 Previous
               </button>
@@ -242,7 +219,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
                 type="button"
                 className="btn btn-outline"
                 disabled={page + 1 >= totalPages}
-                onClick={() => goToPage(page + 1)}
+                onClick={() => setPage(page + 1)}
               >
                 Next
               </button>

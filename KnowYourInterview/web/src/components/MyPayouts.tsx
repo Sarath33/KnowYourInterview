@@ -1,13 +1,7 @@
-import { useEffect, useState } from "react";
 import type { Payout } from "../../../shared/types";
 import * as api from "../lib/api";
-import { ApiError } from "../lib/api";
-import { useAuth } from "../context/AuthContext";
-
-function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  return err instanceof Error ? err.message : "Something went wrong";
-}
+import { useAsync } from "../lib/useAsync";
+import { formatPaise } from "../lib/format";
 
 function payoutStatusLabel(status: Payout["status"]) {
   if (status === "PAID") return <span className="tag tag-success">Paid</span>;
@@ -17,21 +11,8 @@ function payoutStatusLabel(status: Payout["status"]) {
 }
 
 export function MyPayouts() {
-  const { accessToken } = useAuth();
-  const token = accessToken!;
-  const [payouts, setPayouts] = useState<Payout[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setLoading(true);
-    api
-      .listMyPayouts(token)
-      .then(setPayouts)
-      .catch((err) => setError(errorMessage(err)))
-      .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const { data, loading, error } = useAsync(() => api.listMyPayouts(), []);
+  const payouts = data ?? [];
 
   return (
     <div>
@@ -44,7 +25,9 @@ export function MyPayouts() {
       </p>
       {error && <p className="error-text" style={{ marginBottom: 16 }}>{error}</p>}
       {loading ? (
-        <p className="muted">Loading…</p>
+        <p className="muted" aria-busy="true" aria-live="polite">
+          Loading…
+        </p>
       ) : payouts.length === 0 ? (
         <p className="muted">Nothing here yet — payouts show up once one of your experiences is published.</p>
       ) : (
@@ -55,7 +38,7 @@ export function MyPayouts() {
                 <div className="card-title" style={{ fontSize: 15 }}>
                   {p.company} — {p.roleTitle}
                 </div>
-                <span className="price-tag">₹{(p.amountPaise / 100).toFixed(2)}</span>
+                <span className="price-tag">{formatPaise(p.amountPaise)}</span>
                 {p.paidAt && (
                   <span className="muted" style={{ marginLeft: 8, fontSize: 13 }}>
                     paid {new Date(p.paidAt).toLocaleDateString()}

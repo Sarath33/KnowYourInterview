@@ -9,6 +9,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 @Entity
 @Table(name = "purchases")
@@ -30,7 +31,7 @@ public class Purchase {
     private UUID experienceId;
 
     @Column(name = "amount_paise", nullable = false)
-    private int amountPaise;
+    private long amountPaise;
 
     @Column(name = "razorpay_order_id")
     private String razorpayOrderId;
@@ -48,11 +49,17 @@ public class Purchase {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    // Optimistic-lock guard against lost updates (e.g. the confirm-vs-webhook race both
+    // marking this purchase paid). Backed by the "version" column added in V4.
+    @Version
+    @Column(nullable = false)
+    private long version;
+
     protected Purchase() {
         // JPA
     }
 
-    public Purchase(UUID id, UUID userId, UUID experienceId, int amountPaise, String razorpayOrderId) {
+    public Purchase(UUID id, UUID userId, UUID experienceId, long amountPaise, String razorpayOrderId) {
         this.id = id;
         this.userId = userId;
         this.experienceId = experienceId;
@@ -87,7 +94,7 @@ public class Purchase {
         return experienceId;
     }
 
-    public int getAmountPaise() {
+    public long getAmountPaise() {
         return amountPaise;
     }
 

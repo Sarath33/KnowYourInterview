@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { User } from "../../../shared/types";
+import type { AuthResponse, User } from "../../../shared/types";
 import * as api from "../lib/api";
 import { clearSession, loadSession, saveSession } from "../lib/authStorage";
 
@@ -15,27 +15,96 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+/** Base64url-decodes a JWT payload and returns its `exp` (seconds since epoch), or null
+ * if the token isn't a decodable JWT. No dependency — the token is already trusted-ish
+ * local state; this is only a client-side "is it obviously dead?" check, not verification. */
+function decodeJwtExp(token: string): number | null {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return null;
+    const json = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))) as { exp?: number };
+    return typeof json.exp === "number" ? json.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+function isAccessTokenExpired(token: string): boolean {
+  const exp = decodeJwtExp(token);
+  if (exp == null) return false; // Can't tell — don't force a logout on an opaque token.
+  return exp * 1000 <= Date.now();
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const initial = loadSession();
-  const [user, setUser] = useState<User | null>(initial?.user ?? null);
-  const [accessToken, setAccessToken] = useState<string | null>(initial?.accessToken ?? null);
+  // Don't trust a stale localStorage session whose access token has already expired: treat
+  // it as logged-out up front (a refresh is attempted below) so isAuthenticated can't stay
+  // true behind a dead token.
+  const initialValid = !!initial && !isAccessTokenExpired(initial.accessToken);
+
+  const [user, setUser] = useState<User | null>(initialValid ? initial!.user : null);
+  const [accessToken, setAccessToken] = useState<string | null>(initialValid ? initial!.accessToken : null);
   const [refreshToken, setRefreshToken] = useState<string | null>(initial?.refreshToken ?? null);
 
-  const register = useCallback(async (email: string, password: string, displayName: string) => {
-    const res = await api.register({ email, password, displayName });
+  const applyTokens = useCallback((res: AuthResponse) => {
     saveSession(res);
     setUser(res.user);
     setAccessToken(res.accessToken);
     setRefreshToken(res.refreshToken);
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const res = await api.login({ email, password });
-    saveSession(res);
-    setUser(res.user);
-    setAccessToken(res.accessToken);
-    setRefreshToken(res.refreshToken);
+  const clear = useCallback(() => {
+    clearSession();
+    setUser(null);
+    setAccessToken(null);
+    setRefreshToken(null);
   }, []);
+
+  // Register the api layer's auth accessors synchronously (during render, via refs) so
+  // that requests fired from children's mount effects already see the current token and
+  // can refresh on a 401. Refs avoid stale closures without re-registering churn.
+  const accessTokenRef = useRef(accessToken);
+  accessTokenRef.current = accessToken;
+  const refreshTokenRef = useRef(refreshToken);
+  refreshTokenRef.current = refreshToken;
+
+  api.setAuthTokenGetter(() => accessTokenRef.current);
+  api.setAuthHandlers({
+    getRefreshToken: () => refreshTokenRef.current,
+    onRefreshSuccess: applyTokens,
+    onAuthFailure: clear,
+  });
+
+  // On boot, if the persisted access token was expired, try a one-shot refresh so a user
+  // returning to a still-valid refresh token stays logged in; otherwise drop the session.
+  useEffect(() => {
+    if (initial && !initialValid) {
+      if (initial.refreshToken) {
+        api
+          .refreshTokens(initial.refreshToken)
+          .then(applyTokens)
+          .catch(() => clear());
+      } else {
+        clear();
+      }
+    }
+    // Run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const register = useCallback(
+    async (email: string, password: string, displayName: string) => {
+      applyTokens(await api.register({ email, password, displayName }));
+    },
+    [applyTokens],
+  );
+
+  const login = useCallback(
+    async (email: string, password: string) => {
+      applyTokens(await api.login({ email, password }));
+    },
+    [applyTokens],
+  );
 
   const logout = useCallback(async () => {
     if (refreshToken) {
@@ -45,11 +114,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Already invalid/expired server-side — fine, we're clearing local state regardless.
       }
     }
-    clearSession();
-    setUser(null);
-    setAccessToken(null);
-    setRefreshToken(null);
-  }, [refreshToken]);
+    clear();
+  }, [refreshToken, clear]);
 
   const value = useMemo<AuthContextValue>(
     () => ({ user, accessToken, isAuthenticated: !!user, register, login, logout }),

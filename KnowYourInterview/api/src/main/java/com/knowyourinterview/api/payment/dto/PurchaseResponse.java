@@ -12,7 +12,7 @@ import com.knowyourinterview.api.payment.Purchase;
  * refuses to delete anything with a purchase on record — but the null-safe fallback
  * keeps this endpoint from 500ing if that invariant is ever violated. */
 public record PurchaseResponse(
-        UUID id, UUID experienceId, String company, String roleTitle, String level, int amountPaise,
+        UUID id, UUID experienceId, String company, String roleTitle, String level, long amountPaise,
         Purchase.Status status, Instant createdAt) {
 
     public static PurchaseResponse from(Purchase p, Experience experience) {

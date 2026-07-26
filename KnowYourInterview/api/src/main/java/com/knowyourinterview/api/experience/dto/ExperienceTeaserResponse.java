@@ -17,7 +17,7 @@ public record ExperienceTeaserResponse(
         Short interviewYear,
         ExperienceOutcome outcome,
         String teaser,
-        int pricePaise,
+        long pricePaise,
         // Round count is safe to show pre-purchase — it signals content depth without
         // leaking any actual round content (type, questions, etc).
         int roundCount,

@@ -1,26 +1,18 @@
-import { useEffect, useState } from "react";
-import type { Purchase } from "../../../shared/types";
+import { useState } from "react";
 import * as api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
+import { useAsync } from "../lib/useAsync";
+import { formatPaise } from "../lib/format";
 import { ArrowRightIcon } from "./icons";
 
 export function MyLibrary({ onSelect }: { onSelect: (experienceId: string) => void }) {
   const { accessToken } = useAuth();
-  const [purchases, setPurchases] = useState<Purchase[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const { data, loading, error } = useAsync(() => api.listMyPurchases(), [accessToken], {
+    enabled: !!accessToken,
+  });
 
-  useEffect(() => {
-    if (!accessToken) return;
-    setLoading(true);
-    api
-      .listMyPurchases(accessToken)
-      .then(setPurchases)
-      .catch((err) => setError(err instanceof Error ? err.message : "Something went wrong"))
-      .finally(() => setLoading(false));
-  }, [accessToken]);
-
+  const purchases = data ?? [];
   const unlocked = purchases.filter((p) => p.status === "PAID");
   // Client-side is the right call here, not a server-side search like Browse's — this
   // list is already scoped to one person's own purchases (listMyPurchases returns the
@@ -60,7 +52,9 @@ export function MyLibrary({ onSelect }: { onSelect: (experienceId: string) => vo
       </div>
       {error && <p className="error-text" style={{ marginBottom: 16 }}>{error}</p>}
       {loading ? (
-        <p className="muted">Loading…</p>
+        <p className="muted" aria-busy="true" aria-live="polite">
+          Loading…
+        </p>
       ) : unlocked.length === 0 ? (
         <p className="muted">Nothing unlocked yet — experiences you unlock will show up here.</p>
       ) : filtered.length === 0 ? (
@@ -80,7 +74,7 @@ export function MyLibrary({ onSelect }: { onSelect: (experienceId: string) => vo
                   )}
                 </div>
                 <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                  <strong className="price-tag" style={{ fontSize: 13 }}>₹{(p.amountPaise / 100).toFixed(2)}</strong>
+                  <strong className="price-tag" style={{ fontSize: 13 }}>{formatPaise(p.amountPaise)}</strong>
                   {"  "}
                   unlocked {new Date(p.createdAt).toLocaleDateString()}
                 </span>

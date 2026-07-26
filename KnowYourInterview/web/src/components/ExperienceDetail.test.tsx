@@ -100,10 +100,10 @@ describe("ExperienceDetail", () => {
     expect(screen.queryByRole("button", { name: /Unlock/ })).not.toBeInTheDocument();
     expect(screen.getByText(/to unlock this experience/)).toBeInTheDocument();
 
-    // The "Log in" link should actually navigate to the auth screen, not just sit
-    // there as a dead href="#" (the bug this test now guards against).
+    // The "Log in" prompt should actually navigate to the auth screen. It's a real
+    // <button> styled as a link (not a dead href="#"), the bug this test guards against.
     const clickUser = userEvent.setup();
-    await clickUser.click(screen.getByRole("link", { name: "Log in" }));
+    await clickUser.click(screen.getByRole("button", { name: "Log in" }));
     expect(onLoginRequired).toHaveBeenCalledTimes(1);
   });
 
@@ -148,7 +148,7 @@ describe("ExperienceDetail", () => {
     const unlockButton = await screen.findByRole("button", { name: /Unlock ₹199\.00/ });
     await clickUser.click(unlockButton);
 
-    await waitFor(() => expect(mockedApi.createPurchaseOrder).toHaveBeenCalledWith("token-1", "exp-1"));
+    await waitFor(() => expect(mockedApi.createPurchaseOrder).toHaveBeenCalledWith("exp-1"));
     expect(razorpayCtor).toHaveBeenCalledWith(
       expect.objectContaining({
         key: "rzp_test_key",

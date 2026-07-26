@@ -20,7 +20,7 @@ public record ExperienceFullResponse(
         Short interviewYear,
         ExperienceOutcome outcome,
         String teaser,
-        int pricePaise,
+        long pricePaise,
         // Mirrors ExperienceTeaserResponse#roundCount — shared/types.ts's ExperienceFull
         // extends ExperienceTeaser, so this needs to be present here too, not just on the
         // teaser DTO. Trivially derived from the already-loaded rounds list below.

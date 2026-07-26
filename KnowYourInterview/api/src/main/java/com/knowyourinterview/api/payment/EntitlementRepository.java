@@ -22,4 +22,22 @@ public interface EntitlementRepository extends JpaRepository<Entitlement, UUID> 
     @Query("SELECT e.experienceId FROM Entitlement e WHERE e.userId = :userId AND e.experienceId IN :experienceIds")
     List<UUID> findExperienceIdsByUserIdAndExperienceIdIn(
             @Param("userId") UUID userId, @Param("experienceIds") List<UUID> experienceIds);
+
+    /** Bulk unlock-count lookup for a batch of experiences (see
+     * ExperienceResponseAssembler#buildMany) — one query instead of one countByExperienceId
+     * per experience. Experiences with zero unlocks simply don't appear in the result, so
+     * callers should default missing ids to 0. */
+    @Query("""
+            SELECT e.experienceId AS experienceId, COUNT(e) AS unlockCount
+            FROM Entitlement e
+            WHERE e.experienceId IN :experienceIds
+            GROUP BY e.experienceId
+            """)
+    List<ExperienceUnlockCount> countByExperienceIdIn(@Param("experienceIds") List<UUID> experienceIds);
+
+    interface ExperienceUnlockCount {
+        UUID getExperienceId();
+
+        long getUnlockCount();
+    }
 }

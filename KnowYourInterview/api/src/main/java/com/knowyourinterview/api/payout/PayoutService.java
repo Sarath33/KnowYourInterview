@@ -1,7 +1,9 @@
 package com.knowyourinterview.api.payout;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -10,8 +12,6 @@ import com.knowyourinterview.api.common.InvalidStateException;
 import com.knowyourinterview.api.common.NotFoundException;
 import com.knowyourinterview.api.experience.Experience;
 import com.knowyourinterview.api.experience.ExperienceRepository;
-import com.knowyourinterview.api.experience.Payout;
-import com.knowyourinterview.api.experience.PayoutRepository;
 import com.knowyourinterview.api.payout.dto.PayoutResponse;
 import com.knowyourinterview.api.user.User;
 import com.knowyourinterview.api.user.UserRepository;
@@ -39,10 +39,17 @@ public class PayoutService {
 
     @Transactional(readOnly = true)
     public List<PayoutResponse> queue() {
-        return payoutRepository
-                .findByStatusInOrderByCreatedAtAsc(List.of(Payout.Status.PENDING, Payout.Status.PROCESSING))
-                .stream()
-                .map(payout -> PayoutResponse.forAdmin(payout, experienceOf(payout), contributorOf(payout)))
+        List<Payout> payouts = payoutRepository.findByStatusInOrderByCreatedAtAsc(
+                List.of(Payout.Status.PENDING, Payout.Status.PROCESSING));
+        // Batch the experience + contributor lookups (two queries total) instead of a
+        // findById per row (2N queries) — the queue can hold many pending payouts.
+        Map<UUID, Experience> experiencesById = experiencesFor(payouts);
+        Map<UUID, User> contributorsById = contributorsFor(payouts);
+        return payouts.stream()
+                .map(payout -> PayoutResponse.forAdmin(
+                        payout,
+                        requireExperience(experiencesById, payout),
+                        requireContributor(contributorsById, payout)))
                 .toList();
     }
 
@@ -61,9 +68,44 @@ public class PayoutService {
 
     @Transactional(readOnly = true)
     public List<PayoutResponse> listMine(UUID contributorId) {
-        return payoutRepository.findByContributorIdOrderByCreatedAtDesc(contributorId).stream()
-                .map(payout -> PayoutResponse.forContributor(payout, experienceOf(payout)))
+        List<Payout> payouts = payoutRepository.findByContributorIdOrderByCreatedAtDesc(contributorId);
+        // Batch the experience lookup (one query) instead of a findById per row.
+        Map<UUID, Experience> experiencesById = experiencesFor(payouts);
+        return payouts.stream()
+                .map(payout -> PayoutResponse.forContributor(payout, requireExperience(experiencesById, payout)))
                 .toList();
+    }
+
+    private Map<UUID, Experience> experiencesFor(List<Payout> payouts) {
+        List<UUID> ids = payouts.stream().map(Payout::getExperienceId).distinct().toList();
+        return ids.isEmpty()
+                ? Map.of()
+                : experienceRepository.findAllById(ids).stream()
+                        .collect(Collectors.toMap(Experience::getId, e -> e));
+    }
+
+    private Map<UUID, User> contributorsFor(List<Payout> payouts) {
+        List<UUID> ids = payouts.stream().map(Payout::getContributorId).distinct().toList();
+        return ids.isEmpty()
+                ? Map.of()
+                : userRepository.findAllById(ids).stream()
+                        .collect(Collectors.toMap(User::getId, u -> u));
+    }
+
+    private static Experience requireExperience(Map<UUID, Experience> experiencesById, Payout payout) {
+        Experience experience = experiencesById.get(payout.getExperienceId());
+        if (experience == null) {
+            throw new NotFoundException("Experience not found");
+        }
+        return experience;
+    }
+
+    private static User requireContributor(Map<UUID, User> contributorsById, Payout payout) {
+        User contributor = contributorsById.get(payout.getContributorId());
+        if (contributor == null) {
+            throw new NotFoundException("Contributor not found");
+        }
+        return contributor;
     }
 
     private Experience experienceOf(Payout payout) {

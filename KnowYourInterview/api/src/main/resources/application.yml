@@ -74,6 +74,10 @@ app:
     # Local-disk proof storage for dev. Swap for an S3-backed implementation of
     # ProofStorageService in Phase 6 without touching callers.
     proof-dir: ${PROOF_STORAGE_DIR:./uploads/proof}
+  pagination:
+    # Upper bound on the page size a Browse request can ask for — clamps a caller passing
+    # ?size=5000 down to something sane. Wired into ExperienceService.browsePublished.
+    max-page-size: 100
   pricing:
     # Platform-fixed viewer unlock price (paise), applied to every experience at
     # creation time — contributors don't set their own price. Tiering by company/role

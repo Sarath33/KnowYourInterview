@@ -1,15 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useAuth } from "../context/AuthContext";
-import { ApiError } from "../lib/api";
-
-function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    const firstFieldError = err.fieldErrors && Object.values(err.fieldErrors)[0];
-    return firstFieldError ?? err.message;
-  }
-  return err instanceof Error ? err.message : "Something went wrong";
-}
+import { errorMessage } from "../lib/errors";
 
 export function AuthForms({ onGuestBrowse }: { onGuestBrowse: () => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");

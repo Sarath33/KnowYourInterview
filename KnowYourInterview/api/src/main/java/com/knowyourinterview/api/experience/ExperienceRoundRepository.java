@@ -12,6 +12,11 @@ public interface ExperienceRoundRepository extends JpaRepository<ExperienceRound
 
     List<ExperienceRound> findByExperienceIdOrderByRoundNumberAsc(UUID experienceId);
 
+    /** Batched variant for building many experiences at once (see
+     * ExperienceResponseAssembler#buildMany) — rounds come back grouped-friendly, ordered
+     * by experience then round number, so callers can partition by experienceId in memory. */
+    List<ExperienceRound> findByExperienceIdInOrderByExperienceIdAscRoundNumberAsc(List<UUID> experienceIds);
+
     Optional<ExperienceRound> findByIdAndExperienceId(UUID id, UUID experienceId);
 
     long countByExperienceId(UUID experienceId);

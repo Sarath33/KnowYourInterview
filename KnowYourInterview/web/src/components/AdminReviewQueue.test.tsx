@@ -80,7 +80,7 @@ describe("AdminReviewQueue", () => {
 
     await user.click(screen.getByRole("button", { name: /Approve & publish/ }));
 
-    await waitFor(() => expect(mockedApi.adminApprove).toHaveBeenCalledWith("admin-token", "exp-1"));
+    await waitFor(() => expect(mockedApi.adminApprove).toHaveBeenCalledWith("exp-1"));
     expect(mockedApi.adminReviewQueue).toHaveBeenCalledTimes(2);
   });
 
@@ -110,7 +110,7 @@ describe("AdminReviewQueue", () => {
     await user.click(screen.getByRole("button", { name: /Reject/ }));
 
     await waitFor(() =>
-      expect(mockedApi.adminReject).toHaveBeenCalledWith("admin-token", "exp-1", { reason: "Missing proof detail" }),
+      expect(mockedApi.adminReject).toHaveBeenCalledWith("exp-1", { reason: "Missing proof detail" }),
     );
   });
 });

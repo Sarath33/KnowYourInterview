@@ -10,6 +10,10 @@ public interface ProofDocumentRepository extends JpaRepository<ProofDocument, UU
 
     List<ProofDocument> findByExperienceId(UUID experienceId);
 
+    /** Batched variant for building many experiences at once (see
+     * ExperienceResponseAssembler#buildMany). */
+    List<ProofDocument> findByExperienceIdIn(List<UUID> experienceIds);
+
     long countByExperienceId(UUID experienceId);
 
     Optional<ProofDocument> findByIdAndExperienceId(UUID id, UUID experienceId);

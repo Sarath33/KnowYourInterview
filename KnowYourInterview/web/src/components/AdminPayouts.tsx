@@ -1,46 +1,24 @@
-import { useEffect, useState } from "react";
-import type { PayoutAdminView } from "../../../shared/types";
+import { useState } from "react";
 import * as api from "../lib/api";
-import { ApiError } from "../lib/api";
-import { useAuth } from "../context/AuthContext";
-
-function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  return err instanceof Error ? err.message : "Something went wrong";
-}
+import { useAsync } from "../lib/useAsync";
+import { errorMessage } from "../lib/errors";
+import { formatPaise } from "../lib/format";
 
 export function AdminPayouts() {
-  const { accessToken } = useAuth();
-  const token = accessToken!;
-  const [queue, setQueue] = useState<PayoutAdminView[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, error: loadError, refetch } = useAsync(() => api.adminPayoutQueue(), []);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [referenceDrafts, setReferenceDrafts] = useState<Record<string, string>>({});
 
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setQueue(await api.adminPayoutQueue(token));
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const queue = data ?? [];
+  const error = actionError ?? loadError;
 
   const markPaid = async (id: string) => {
-    setError(null);
+    setActionError(null);
     try {
-      await api.adminMarkPayoutPaid(token, id, { reference: referenceDrafts[id]?.trim() || undefined });
-      await load();
+      await api.adminMarkPayoutPaid(id, { reference: referenceDrafts[id]?.trim() || undefined });
+      await refetch();
     } catch (err) {
-      setError(errorMessage(err));
+      setActionError(errorMessage(err));
     }
   };
 
@@ -55,7 +33,9 @@ export function AdminPayouts() {
       </p>
       {error && <p className="error-text" style={{ marginBottom: 16 }}>{error}</p>}
       {loading ? (
-        <p className="muted">Loading…</p>
+        <p className="muted" aria-busy="true" aria-live="polite">
+          Loading…
+        </p>
       ) : queue.length === 0 ? (
         <p className="muted">Nothing owed right now.</p>
       ) : (
@@ -69,7 +49,7 @@ export function AdminPayouts() {
                 Owed to <strong>{payout.contributorDisplayName}</strong> ({payout.contributorEmail})
               </p>
               <p style={{ margin: "0 0 16px" }}>
-                <span className="price-tag">₹{(payout.amountPaise / 100).toFixed(2)}</span>{" "}
+                <span className="price-tag">{formatPaise(payout.amountPaise)}</span>{" "}
                 <span className="muted" style={{ fontSize: 13 }}>— {payout.status}</span>
               </p>
               <div className="row">

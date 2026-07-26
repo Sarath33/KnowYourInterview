@@ -172,14 +172,14 @@ class PurchaseFlowIT {
                 .filter(p -> p.experienceId().equals(experienceId))
                 .findFirst()
                 .orElseThrow();
-        assertThat(owed.status()).isEqualTo(com.knowyourinterview.api.experience.Payout.Status.PENDING);
+        assertThat(owed.status()).isEqualTo(com.knowyourinterview.api.payout.Payout.Status.PENDING);
         assertThat(owed.contributorEmail()).isEqualTo(contributor.user().email());
 
         ResponseEntity<PayoutResponse> markedPaid = post(
                 "/api/v1/admin/payouts/" + owed.id() + "/mark-paid", admin.accessToken(),
                 new MarkPayoutPaidRequest("UPI-IT-TEST-REF"), PayoutResponse.class);
         assertThat(markedPaid.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(markedPaid.getBody().status()).isEqualTo(com.knowyourinterview.api.experience.Payout.Status.PAID);
+        assertThat(markedPaid.getBody().status()).isEqualTo(com.knowyourinterview.api.payout.Payout.Status.PAID);
 
         // --- Contributor can see it's paid ---
         ResponseEntity<List<PayoutResponse>> myPayouts = getList(
@@ -188,7 +188,7 @@ class PurchaseFlowIT {
         assertThat(myPayouts.getBody())
                 .filteredOn(p -> p.experienceId().equals(experienceId))
                 .extracting(PayoutResponse::status)
-                .containsExactly(com.knowyourinterview.api.experience.Payout.Status.PAID);
+                .containsExactly(com.knowyourinterview.api.payout.Payout.Status.PAID);
     }
 
     private AuthResponse register(String displayName, String email) {

@@ -8,11 +8,13 @@ import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.knowyourinterview.api.common.InvalidStateException;
 import com.knowyourinterview.api.common.NotFoundException;
+import com.knowyourinterview.api.common.UpstreamServiceException;
 import com.knowyourinterview.api.experience.Experience;
 import com.knowyourinterview.api.experience.ExperienceRepository;
 import com.knowyourinterview.api.experience.ExperienceStatus;
@@ -33,6 +35,7 @@ public class PurchaseService {
     private final ExperienceRepository experienceRepository;
     private final PurchaseRepository purchaseRepository;
     private final EntitlementRepository entitlementRepository;
+    private final PurchaseOrderPersister orderPersister;
     private final String keyId;
     private final String keySecret;
     private final String webhookSecret;
@@ -41,18 +44,27 @@ public class PurchaseService {
             ExperienceRepository experienceRepository,
             PurchaseRepository purchaseRepository,
             EntitlementRepository entitlementRepository,
+            PurchaseOrderPersister orderPersister,
             @Value("${app.razorpay.key-id}") String keyId,
             @Value("${app.razorpay.key-secret}") String keySecret,
             @Value("${app.razorpay.webhook-secret}") String webhookSecret) {
         this.experienceRepository = experienceRepository;
         this.purchaseRepository = purchaseRepository;
         this.entitlementRepository = entitlementRepository;
+        this.orderPersister = orderPersister;
         this.keyId = keyId;
         this.keySecret = keySecret;
         this.webhookSecret = webhookSecret;
     }
 
-    @Transactional
+    /**
+     * NOT @Transactional on purpose (H1): the Razorpay Orders API call is a remote network
+     * call and must not run inside a DB transaction (a slow/failed provider would otherwise
+     * pin a DB connection open for the whole round trip). The read-only guard queries and
+     * the final insert each run in their own short transaction — the insert via
+     * {@link PurchaseOrderPersister} (a separate bean, because a self-invoked @Transactional
+     * method wouldn't be proxied).
+     */
     public CreateOrderResponse createOrder(UUID userId, UUID experienceId) {
         Experience experience = experienceRepository.findById(experienceId)
                 .orElseThrow(() -> new NotFoundException("Experience not found"));
@@ -63,6 +75,13 @@ public class PurchaseService {
             throw new InvalidStateException("You already have access to this experience");
         }
 
+        // Missing keys are a server misconfiguration (our side), not an upstream outage —
+        // surface as a plain InvalidState rather than the 502 below, and before any call.
+        if (keyId == null || keyId.isBlank() || keySecret == null || keySecret.isBlank()) {
+            throw new InvalidStateException("Could not start checkout — payments aren't configured correctly");
+        }
+
+        String razorpayOrderId;
         try {
             // Auto-capture is an account-level Dashboard setting in current Razorpay API
             // versions, not a per-order field — don't set "payment_capture" here, it's not
@@ -71,18 +90,20 @@ public class PurchaseService {
             orderRequest.put("amount", experience.getPricePaise());
             orderRequest.put("currency", CURRENCY);
             orderRequest.put("receipt", "exp_" + experienceId);
-            com.razorpay.Order order = client().orders.create(orderRequest);
-            String razorpayOrderId = order.get("id");
-
-            Purchase purchase = new Purchase(
-                    UUID.randomUUID(), userId, experienceId, experience.getPricePaise(), razorpayOrderId);
-            purchaseRepository.save(purchase);
-
-            return new CreateOrderResponse(experienceId, razorpayOrderId, experience.getPricePaise(), CURRENCY, keyId);
+            // Remote call — deliberately outside any DB transaction (see method javadoc).
+            com.razorpay.Order order = new RazorpayClient(keyId, keySecret).orders.create(orderRequest);
+            razorpayOrderId = order.get("id");
         } catch (RazorpayException e) {
             log.error("Failed to create Razorpay order for experience {}", experienceId, e);
-            throw new InvalidStateException("Could not start checkout — payments aren't configured correctly");
+            throw new UpstreamServiceException("Could not reach the payment provider — please try again");
         }
+
+        // Only after the remote order exists do we open a short transaction to persist ours.
+        Purchase purchase = new Purchase(
+                UUID.randomUUID(), userId, experienceId, experience.getPricePaise(), razorpayOrderId);
+        orderPersister.persist(purchase);
+
+        return new CreateOrderResponse(experienceId, razorpayOrderId, experience.getPricePaise(), CURRENCY, keyId);
     }
 
     /** Called by the frontend right after Razorpay Checkout reports success. */
@@ -162,17 +183,19 @@ public class PurchaseService {
         purchase.markPaid(razorpayPaymentId);
         purchaseRepository.save(purchase);
 
-        if (!entitlementRepository.existsByUserIdAndExperienceId(purchase.getUserId(), purchase.getExperienceId())) {
-            entitlementRepository.save(new Entitlement(
-                    UUID.randomUUID(), purchase.getUserId(), purchase.getExperienceId(), purchase.getId()));
+        try {
+            if (!entitlementRepository.existsByUserIdAndExperienceId(purchase.getUserId(), purchase.getExperienceId())) {
+                entitlementRepository.save(new Entitlement(
+                        UUID.randomUUID(), purchase.getUserId(), purchase.getExperienceId(), purchase.getId()));
+            }
+        } catch (DataIntegrityViolationException e) {
+            // Confirm-vs-webhook race (H3): the other path inserted the entitlement between
+            // our exists-check and our insert. The UNIQUE(user_id, experience_id) constraint
+            // on entitlements is the real guarantee that a viewer is unlocked at most once —
+            // so a collision here means the unlock already happened. Treat it as success
+            // rather than surfacing a 500 to a viewer who did, in fact, get access.
+            log.debug("Entitlement for user {} / experience {} already existed (confirm-vs-webhook race) — "
+                    + "treating as already granted", purchase.getUserId(), purchase.getExperienceId());
         }
-    }
-
-    private RazorpayClient client() throws RazorpayException {
-        if (keyId == null || keyId.isBlank() || keySecret == null || keySecret.isBlank()) {
-            throw new RazorpayException(
-                    "RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET are not set on the backend environment");
-        }
-        return new RazorpayClient(keyId, keySecret);
     }
 }

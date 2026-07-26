@@ -1,15 +1,13 @@
-import { useEffect, useState } from "react";
-import type { ExperienceFull, ExperienceTeaser, ExperienceView, User } from "../../../shared/types";
+import { useState } from "react";
+import type { ExperienceFull, ExperienceTeaser, User } from "../../../shared/types";
 import * as api from "../lib/api";
-import { loadRazorpayCheckout } from "../lib/razorpay";
+import { startCheckout } from "../lib/razorpay";
 import { useAuth } from "../context/AuthContext";
+import { useAsync } from "../lib/useAsync";
+import { errorMessage } from "../lib/errors";
 import { OutcomeTag, RemoteTag } from "./tags";
 import { ArrowLeftIcon, LockIcon } from "./icons";
-import { interviewedLabel, roundCountLabel } from "../lib/format";
-
-function levelLine(exp: { level?: string; location?: string }): string {
-  return [exp.level, exp.location].filter(Boolean).join(" · ") || "—";
-}
+import { formatPaise, interviewedLabel, levelLine, roundCountLabel } from "../lib/format";
 
 export function ExperienceDetail({
   experienceId,
@@ -21,99 +19,70 @@ export function ExperienceDetail({
   onLoginRequired: () => void;
 }) {
   const { accessToken, isAuthenticated, user } = useAuth();
-  const [view, setView] = useState<ExperienceView | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Re-fetch when the id changes, or when the token appears/changes (so a viewer who logs
+  // in mid-view gets their entitlement re-evaluated). useAsync ignores stale responses,
+  // fixing the out-of-order race the manual load() had.
+  const { data: view, loading, error: loadError, refetch } = useAsync(
+    () => api.getExperience(experienceId),
+    [experienceId, accessToken],
+  );
+  const [actionError, setActionError] = useState<string | null>(null);
   const [purchasing, setPurchasing] = useState(false);
   const [unpublishing, setUnpublishing] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api.getExperience(experienceId, accessToken ?? undefined);
-      setView(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [experienceId]);
+  const error = actionError ?? loadError;
 
   const unlock = async () => {
     if (!accessToken) return;
-    setError(null);
+    setActionError(null);
     setPurchasing(true);
     try {
-      await loadRazorpayCheckout();
-      const order = await api.createPurchaseOrder(accessToken, experienceId);
-
-      if (!window.Razorpay) {
-        throw new Error("Payment popup failed to load");
-      }
-      const checkout = new window.Razorpay({
-        key: order.razorpayKeyId,
-        amount: order.amountPaise,
-        currency: order.currency,
-        order_id: order.razorpayOrderId,
-        name: "Know Your Interview",
-        description: "Unlock full interview experience",
-        prefill: user ? { email: user.email, name: user.displayName } : undefined,
-        handler: async (response: unknown) => {
-          const r = response as {
-            razorpay_order_id: string;
-            razorpay_payment_id: string;
-            razorpay_signature: string;
-          };
-          try {
-            await api.confirmPurchase(accessToken, {
-              razorpayOrderId: r.razorpay_order_id,
-              razorpayPaymentId: r.razorpay_payment_id,
-              razorpaySignature: r.razorpay_signature,
-            });
-            await load();
-          } catch (err) {
-            // The charge went through on Razorpay's side even if our confirm call
-            // failed — the webhook backup path (see PurchaseService) will still grant
-            // the entitlement shortly, so this isn't a lost payment.
-            setError(
-              err instanceof Error
-                ? `Payment received but confirmation failed: ${err.message}. Refresh in a moment — it should unlock automatically.`
-                : "Payment received but confirmation failed. Refresh in a moment.",
-            );
-          } finally {
-            setPurchasing(false);
-          }
+      const order = await api.createPurchaseOrder(experienceId);
+      await startCheckout(order, user, {
+        onSuccess: (r) => {
+          void (async () => {
+            try {
+              await api.confirmPurchase({
+                razorpayOrderId: r.razorpay_order_id,
+                razorpayPaymentId: r.razorpay_payment_id,
+                razorpaySignature: r.razorpay_signature,
+              });
+              await refetch();
+            } catch (err) {
+              // The charge went through on Razorpay's side even if our confirm call
+              // failed — the webhook backup path (see PurchaseService) will still grant
+              // the entitlement shortly, so this isn't a lost payment.
+              setActionError(
+                err instanceof Error
+                  ? `Payment received but confirmation failed: ${err.message}. Refresh in a moment — it should unlock automatically.`
+                  : "Payment received but confirmation failed. Refresh in a moment.",
+              );
+            } finally {
+              setPurchasing(false);
+            }
+          })();
         },
-        modal: {
-          ondismiss: () => setPurchasing(false),
+        onFailure: () => {
+          setActionError("Payment failed — you weren't charged. You can try again.");
+          setPurchasing(false);
         },
+        onDismiss: () => setPurchasing(false),
       });
-      checkout.on("payment.failed", () => {
-        setError("Payment failed — you weren't charged. You can try again.");
-        setPurchasing(false);
-      });
-      checkout.open();
     } catch (err) {
       setPurchasing(false);
-      setError(err instanceof Error ? err.message : "Could not start checkout");
+      setActionError(errorMessage(err));
     }
   };
 
   const unpublish = async () => {
     if (!accessToken) return;
-    setError(null);
+    setActionError(null);
     setUnpublishing(true);
     try {
-      await api.unpublishExperience(accessToken, experienceId);
-      await load();
+      await api.unpublishExperience(experienceId);
+      await refetch();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not unpublish");
+      setActionError(errorMessage(err));
     } finally {
       setUnpublishing(false);
     }
@@ -127,7 +96,11 @@ export function ExperienceDetail({
       </button>
 
       {error && <p className="error-text" style={{ marginBottom: 16 }}>{error}</p>}
-      {loading && <p className="muted">Loading…</p>}
+      {loading && (
+        <p className="muted" aria-busy="true" aria-live="polite">
+          Loading…
+        </p>
+      )}
 
       {view && !view.entitled && (
         <TeaserWithUnlock
@@ -178,7 +151,7 @@ function TeaserWithUnlock({
       <p style={{ color: "var(--text-secondary)", fontSize: 15, lineHeight: 1.6 }}>{teaser.teaser}</p>
       <div className="divider" />
       <p style={{ fontSize: 15, color: "var(--text-secondary-2)", lineHeight: 1.6 }}>
-        <strong className="price-tag-lg">₹{(teaser.pricePaise / 100).toFixed(2)}</strong>
+        <strong className="price-tag-lg">{formatPaise(teaser.pricePaise)}</strong>
         &nbsp;to unlock the full write-up — every round, questions asked, prep advice, and outcome
         details.
       </p>
@@ -190,20 +163,14 @@ function TeaserWithUnlock({
           className="btn btn-primary btn-block"
           style={{ padding: 13, fontSize: 15, marginTop: 8 }}
         >
-          {purchasing ? "Opening checkout…" : `Unlock ₹${(teaser.pricePaise / 100).toFixed(2)}`}
+          {purchasing ? "Opening checkout…" : `Unlock ${formatPaise(teaser.pricePaise)}`}
           <LockIcon />
         </button>
       ) : (
         <p style={{ marginTop: 8 }}>
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
-              onLoginRequired();
-            }}
-          >
+          <button type="button" className="link-button" onClick={onLoginRequired}>
             Log in
-          </a>{" "}
+          </button>{" "}
           to unlock this experience.
         </p>
       )}

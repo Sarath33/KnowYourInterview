@@ -1,4 +1,4 @@
-package com.knowyourinterview.api.experience;
+package com.knowyourinterview.api.payout;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -9,6 +9,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 /**
  * Ledger record created when an experience is approved/published. Money movement is
@@ -42,7 +43,7 @@ public class Payout {
     private UUID contributorId;
 
     @Column(name = "amount_paise", nullable = false)
-    private int amountPaise;
+    private long amountPaise;
 
     @Column(name = "razorpayx_payout_id")
     private String razorpayxPayoutId;
@@ -63,11 +64,17 @@ public class Payout {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    // Optimistic-lock guard against lost updates (e.g. two admins marking the same payout
+    // paid at once). Backed by the "version" column added in V4.
+    @Version
+    @Column(nullable = false)
+    private long version;
+
     protected Payout() {
         // JPA
     }
 
-    public Payout(UUID id, UUID experienceId, UUID contributorId, int amountPaise) {
+    public Payout(UUID id, UUID experienceId, UUID contributorId, long amountPaise) {
         this.id = id;
         this.experienceId = experienceId;
         this.contributorId = contributorId;
@@ -97,7 +104,7 @@ public class Payout {
         return contributorId;
     }
 
-    public int getAmountPaise() {
+    public long getAmountPaise() {
         return amountPaise;
     }
 

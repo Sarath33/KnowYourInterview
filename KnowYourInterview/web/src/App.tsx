@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { getHealth } from "./lib/api";
 import type { HealthResponse } from "../../shared/types";
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -62,9 +63,6 @@ function parseRoute(pathname: string): Route {
   return { name: "redirect", to: "/browse" };
 }
 
-const AUTH_REQUIRED: Route["name"][] = ["library", "submissions", "payouts", "admin", "adminPayouts"];
-const ADMIN_REQUIRED: Route["name"][] = ["admin", "adminPayouts"];
-
 function NavTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className={`nav-tab${active ? " is-active" : ""}`}>
@@ -73,28 +71,37 @@ function NavTab({ label, active, onClick }: { label: string; active: boolean; on
   );
 }
 
+/** Bounces to `to` via a replace navigation (no history entry to get stuck on) and renders
+ * nothing. Replaces the imperative redirectTarget/useEffect that used to live in AppContent. */
+function Redirect({ to }: { to: string }) {
+  const { navigate } = useRouter();
+  useEffect(() => {
+    navigate(to, { replace: true });
+  }, [to, navigate]);
+  return null;
+}
+
+/** Route guard: renders children only for a signed-in user; otherwise bounces to /login.
+ * Encodes the former AUTH_REQUIRED semantics. */
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) return <Redirect to="/login" />;
+  return <>{children}</>;
+}
+
+/** Route guard: renders children only for a signed-in admin; non-admins go to /browse,
+ * signed-out users to /login. Encodes the former ADMIN_REQUIRED semantics. */
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const { isAuthenticated, user } = useAuth();
+  if (!isAuthenticated) return <Redirect to="/login" />;
+  if (!user?.isAdmin) return <Redirect to="/browse" />;
+  return <>{children}</>;
+}
+
 function AppContent() {
   const { user, isAuthenticated, logout } = useAuth();
   const { pathname, navigate, goBack } = useRouter();
   const route = parseRoute(pathname);
-
-  // A route that needs a bounce (root "/", already-logged-in on /login, an auth/admin
-  // gate that isn't satisfied) never actually renders — it's redirected via `replace` so
-  // the bounce itself doesn't leave a history entry to get stuck on.
-  const redirectTarget =
-    route.name === "redirect"
-      ? route.to || (isAuthenticated ? "/browse" : "/login")
-      : route.name === "login" && isAuthenticated
-        ? "/browse"
-        : AUTH_REQUIRED.includes(route.name) && !isAuthenticated
-          ? "/login"
-          : ADMIN_REQUIRED.includes(route.name) && isAuthenticated && !user?.isAdmin
-            ? "/browse"
-            : null;
-
-  useEffect(() => {
-    if (redirectTarget) navigate(redirectTarget, { replace: true });
-  }, [redirectTarget, navigate]);
 
   const handleLogout = async () => {
     await logout();
@@ -102,6 +109,66 @@ function AppContent() {
   };
 
   const closeDetail = () => goBack(route.name === "library" ? "/library" : "/browse");
+
+  // Guards are expressed declaratively via <RequireAuth>/<RequireAdmin> + <Redirect>,
+  // replacing the old nested-ternary redirectTarget. Redirect behavior (replace:true) and
+  // the auth/admin semantics are preserved.
+  const renderRoute = () => {
+    switch (route.name) {
+      case "redirect":
+        return <Redirect to={route.to || (isAuthenticated ? "/browse" : "/login")} />;
+      case "login":
+        return isAuthenticated ? <Redirect to="/browse" /> : <AuthForms onGuestBrowse={() => navigate("/browse")} />;
+      case "browse":
+        return route.experienceId ? (
+          <ExperienceDetail
+            experienceId={route.experienceId}
+            onClose={closeDetail}
+            onLoginRequired={() => navigate("/login")}
+          />
+        ) : (
+          <BrowseExperiences onSelect={(id) => navigate(`/browse/${id}`)} />
+        );
+      case "library":
+        return (
+          <RequireAuth>
+            {route.experienceId ? (
+              <ExperienceDetail
+                experienceId={route.experienceId}
+                onClose={closeDetail}
+                onLoginRequired={() => navigate("/login")}
+              />
+            ) : (
+              <MyLibrary onSelect={(id) => navigate(`/library/${id}`)} />
+            )}
+          </RequireAuth>
+        );
+      case "submissions":
+        return (
+          <RequireAuth>
+            <SubmissionWorkspace />
+          </RequireAuth>
+        );
+      case "payouts":
+        return (
+          <RequireAuth>
+            <MyPayouts />
+          </RequireAuth>
+        );
+      case "admin":
+        return (
+          <RequireAdmin>
+            <AdminReviewQueue />
+          </RequireAdmin>
+        );
+      case "adminPayouts":
+        return (
+          <RequireAdmin>
+            <AdminPayouts />
+          </RequireAdmin>
+        );
+    }
+  };
 
   return (
     <div className="app-shell">
@@ -137,28 +204,7 @@ function AppContent() {
 
       <main className="app-main">
         <HealthBanner />
-
-        {redirectTarget ? null : (
-          <>
-            {(route.name === "browse" || route.name === "library") && route.experienceId ? (
-              <ExperienceDetail
-                experienceId={route.experienceId}
-                onClose={closeDetail}
-                onLoginRequired={() => navigate("/login")}
-              />
-            ) : (
-              <>
-                {route.name === "login" && <AuthForms onGuestBrowse={() => navigate("/browse")} />}
-                {route.name === "browse" && <BrowseExperiences onSelect={(id) => navigate(`/browse/${id}`)} />}
-                {route.name === "library" && <MyLibrary onSelect={(id) => navigate(`/library/${id}`)} />}
-                {route.name === "submissions" && <SubmissionWorkspace />}
-                {route.name === "payouts" && <MyPayouts />}
-                {route.name === "admin" && <AdminReviewQueue />}
-                {route.name === "adminPayouts" && <AdminPayouts />}
-              </>
-            )}
-          </>
-        )}
+        {renderRoute()}
       </main>
     </div>
   );

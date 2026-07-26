@@ -12,7 +12,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import com.knowyourinterview.api.experience.Payout;
 import com.knowyourinterview.api.payout.dto.PayoutResponse;
 import com.knowyourinterview.api.security.JwtService;
 import com.knowyourinterview.api.security.SecurityConfig;

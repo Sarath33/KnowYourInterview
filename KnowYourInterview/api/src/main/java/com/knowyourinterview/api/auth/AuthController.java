@@ -1,7 +1,5 @@
 package com.knowyourinterview.api.auth;
 
-import java.util.Map;
-
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -14,6 +12,7 @@ import com.knowyourinterview.api.auth.dto.AuthResponse;
 import com.knowyourinterview.api.auth.dto.ForgotPasswordRequest;
 import com.knowyourinterview.api.auth.dto.LoginRequest;
 import com.knowyourinterview.api.auth.dto.LogoutRequest;
+import com.knowyourinterview.api.auth.dto.MessageResponse;
 import com.knowyourinterview.api.auth.dto.RefreshRequest;
 import com.knowyourinterview.api.auth.dto.RegisterRequest;
 import com.knowyourinterview.api.auth.dto.ResetPasswordRequest;
@@ -53,16 +52,16 @@ public class AuthController {
     }
 
     @PostMapping("/forgot-password")
-    public ResponseEntity<Map<String, String>> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+    public ResponseEntity<MessageResponse> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
         authService.forgotPassword(request.email());
         // Deliberately generic — doesn't reveal whether the email is registered.
-        return ResponseEntity.ok(Map.of(
-                "message", "If an account exists for that email, a reset link has been sent."));
+        return ResponseEntity.ok(new MessageResponse(
+                "If an account exists for that email, a reset link has been sent."));
     }
 
     @PostMapping("/reset-password")
-    public ResponseEntity<Map<String, String>> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+    public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         authService.resetPassword(request.token(), request.newPassword());
-        return ResponseEntity.ok(Map.of("message", "Password updated."));
+        return ResponseEntity.ok(new MessageResponse("Password updated."));
     }
 }

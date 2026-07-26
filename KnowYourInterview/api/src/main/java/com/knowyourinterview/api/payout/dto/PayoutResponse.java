@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 import com.knowyourinterview.api.experience.Experience;
-import com.knowyourinterview.api.experience.Payout;
+import com.knowyourinterview.api.payout.Payout;
 import com.knowyourinterview.api.user.User;
 
 public record PayoutResponse(
@@ -15,7 +15,7 @@ public record PayoutResponse(
         UUID contributorId,
         String contributorEmail,
         String contributorDisplayName,
-        int amountPaise,
+        long amountPaise,
         Payout.Status status,
         String payoutReference,
         Instant paidAt,

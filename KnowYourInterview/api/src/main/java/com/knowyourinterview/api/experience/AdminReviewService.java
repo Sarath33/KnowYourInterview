@@ -10,48 +10,42 @@ import org.springframework.transaction.annotation.Transactional;
 import com.knowyourinterview.api.common.InvalidStateException;
 import com.knowyourinterview.api.common.NotFoundException;
 import com.knowyourinterview.api.experience.dto.ExperienceFullResponse;
-import com.knowyourinterview.api.experience.dto.ExperienceRoundResponse;
-import com.knowyourinterview.api.experience.dto.ProofDocumentResponse;
-import com.knowyourinterview.api.payment.EntitlementRepository;
+import com.knowyourinterview.api.payout.Payout;
+import com.knowyourinterview.api.payout.PayoutRepository;
 
 @Service
 public class AdminReviewService {
 
     private final ExperienceRepository experienceRepository;
-    private final ExperienceRoundRepository roundRepository;
-    private final ProofDocumentRepository proofDocumentRepository;
     private final ReviewLogRepository reviewLogRepository;
     private final PayoutRepository payoutRepository;
-    private final EntitlementRepository entitlementRepository;
-    private final int contributorPayoutPaise;
+    private final ExperienceResponseAssembler responseAssembler;
+    private final long contributorPayoutPaise;
 
     public AdminReviewService(
             ExperienceRepository experienceRepository,
-            ExperienceRoundRepository roundRepository,
-            ProofDocumentRepository proofDocumentRepository,
             ReviewLogRepository reviewLogRepository,
             PayoutRepository payoutRepository,
-            EntitlementRepository entitlementRepository,
-            @Value("${app.pricing.contributor-payout-paise}") int contributorPayoutPaise) {
+            ExperienceResponseAssembler responseAssembler,
+            @Value("${app.pricing.contributor-payout-paise}") long contributorPayoutPaise) {
         this.experienceRepository = experienceRepository;
-        this.roundRepository = roundRepository;
-        this.proofDocumentRepository = proofDocumentRepository;
         this.reviewLogRepository = reviewLogRepository;
         this.payoutRepository = payoutRepository;
-        this.entitlementRepository = entitlementRepository;
+        this.responseAssembler = responseAssembler;
         this.contributorPayoutPaise = contributorPayoutPaise;
     }
 
     @Transactional(readOnly = true)
     public List<ExperienceFullResponse> reviewQueue() {
-        return experienceRepository.findByStatusOrderByCreatedAtAsc(ExperienceStatus.PENDING_REVIEW).stream()
-                .map(this::toFullResponse)
-                .toList();
+        // Batched build — one query each for rounds/proofs/unlock-counts across the queue,
+        // instead of three per pending experience.
+        return responseAssembler.buildMany(
+                experienceRepository.findByStatusOrderByCreatedAtAsc(ExperienceStatus.PENDING_REVIEW));
     }
 
     @Transactional(readOnly = true)
     public ExperienceFullResponse getForReview(UUID experienceId) {
-        return toFullResponse(getOrThrow(experienceId));
+        return responseAssembler.toFullResponse(getOrThrow(experienceId));
     }
 
     @Transactional
@@ -73,7 +67,7 @@ public class AdminReviewService {
         payoutRepository.save(new Payout(
                 UUID.randomUUID(), experienceId, experience.getContributorId(), contributorPayoutPaise));
 
-        return toFullResponse(experience);
+        return responseAssembler.toFullResponse(experience);
     }
 
     @Transactional
@@ -89,24 +83,11 @@ public class AdminReviewService {
         reviewLogRepository.save(new ReviewLog(
                 UUID.randomUUID(), experienceId, adminId, ReviewLog.Action.REJECTED, reason));
 
-        return toFullResponse(experience);
+        return responseAssembler.toFullResponse(experience);
     }
 
     private Experience getOrThrow(UUID experienceId) {
         return experienceRepository.findById(experienceId)
                 .orElseThrow(() -> new NotFoundException("Experience not found"));
-    }
-
-    private ExperienceFullResponse toFullResponse(Experience experience) {
-        List<ExperienceRoundResponse> rounds = roundRepository
-                .findByExperienceIdOrderByRoundNumberAsc(experience.getId()).stream()
-                .map(ExperienceRoundResponse::from)
-                .toList();
-        List<ProofDocumentResponse> proof = proofDocumentRepository
-                .findByExperienceId(experience.getId()).stream()
-                .map(ProofDocumentResponse::from)
-                .toList();
-        long unlockCount = entitlementRepository.countByExperienceId(experience.getId());
-        return ExperienceFullResponse.from(experience, rounds, proof, unlockCount);
     }
 }

@@ -1,4 +1,4 @@
-package com.knowyourinterview.api.experience;
+package com.knowyourinterview.api.payout;
 
 import java.util.List;
 import java.util.UUID;

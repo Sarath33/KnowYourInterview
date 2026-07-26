@@ -15,8 +15,6 @@ import com.knowyourinterview.api.common.NotFoundException;
 import com.knowyourinterview.api.experience.Experience;
 import com.knowyourinterview.api.experience.ExperienceOutcome;
 import com.knowyourinterview.api.experience.ExperienceRepository;
-import com.knowyourinterview.api.experience.Payout;
-import com.knowyourinterview.api.experience.PayoutRepository;
 import com.knowyourinterview.api.payout.dto.PayoutResponse;
 import com.knowyourinterview.api.user.User;
 import com.knowyourinterview.api.user.UserRepository;

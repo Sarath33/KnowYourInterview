@@ -14,6 +14,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.knowyourinterview.api.common.ForbiddenException;
@@ -28,6 +30,7 @@ import com.knowyourinterview.api.experience.dto.ExperienceViewResponse;
 import com.knowyourinterview.api.experience.dto.ProofDocumentResponse;
 import com.knowyourinterview.api.experience.dto.RoundRequest;
 import com.knowyourinterview.api.payment.EntitlementRepository;
+import com.knowyourinterview.api.payout.PayoutRepository;
 
 @Service
 public class ExperienceService {
@@ -39,7 +42,9 @@ public class ExperienceService {
     private final EntitlementRepository entitlementRepository;
     private final ReviewLogRepository reviewLogRepository;
     private final PayoutRepository payoutRepository;
+    private final ExperienceResponseAssembler responseAssembler;
     private final int defaultPricePaise;
+    private final int maxPageSize;
 
     public ExperienceService(
             ExperienceRepository experienceRepository,
@@ -49,7 +54,9 @@ public class ExperienceService {
             EntitlementRepository entitlementRepository,
             ReviewLogRepository reviewLogRepository,
             PayoutRepository payoutRepository,
-            @Value("${app.pricing.default-price-paise}") int defaultPricePaise) {
+            ExperienceResponseAssembler responseAssembler,
+            @Value("${app.pricing.default-price-paise}") int defaultPricePaise,
+            @Value("${app.pagination.max-page-size:100}") int maxPageSize) {
         this.experienceRepository = experienceRepository;
         this.roundRepository = roundRepository;
         this.proofDocumentRepository = proofDocumentRepository;
@@ -57,7 +64,9 @@ public class ExperienceService {
         this.entitlementRepository = entitlementRepository;
         this.reviewLogRepository = reviewLogRepository;
         this.payoutRepository = payoutRepository;
+        this.responseAssembler = responseAssembler;
         this.defaultPricePaise = defaultPricePaise;
+        this.maxPageSize = maxPageSize;
     }
 
     @Transactional
@@ -67,7 +76,7 @@ public class ExperienceService {
                 req.isRemote(), req.interviewMonth(), req.interviewYear(), req.outcome(), req.teaser(),
                 req.prepAdvice(), req.overallDifficulty(), req.timeline(), req.compensation(), defaultPricePaise);
         experienceRepository.save(experience);
-        return toFullResponse(experience);
+        return responseAssembler.toFullResponse(experience);
     }
 
     @Transactional
@@ -79,7 +88,7 @@ public class ExperienceService {
                 req.interviewYear(), req.outcome(), req.teaser(), req.prepAdvice(), req.overallDifficulty(),
                 req.timeline(), req.compensation());
         experienceRepository.save(experience);
-        return toFullResponse(experience);
+        return responseAssembler.toFullResponse(experience);
     }
 
     @Transactional
@@ -127,7 +136,10 @@ public class ExperienceService {
         ProofDocument doc = proofDocumentRepository.findByIdAndExperienceId(proofId, experienceId)
                 .orElseThrow(() -> new NotFoundException("Proof document not found"));
         proofDocumentRepository.delete(doc);
-        proofStorageService.delete(doc.getStorageKey());
+        // Delete the file only after the row-removal commits — a rollback would restore the
+        // row, and we must not have already deleted the file it points at (H1: keep disk and
+        // DB from drifting).
+        deleteFileAfterCommit(doc.getStorageKey());
     }
 
     /** Owner-only, DRAFT-or-REJECTED only (narrower than the content-editable window —
@@ -158,11 +170,13 @@ public class ExperienceService {
                     "This experience has a payout on record and can't be deleted");
         }
         List<ProofDocument> proofDocs = proofDocumentRepository.findByExperienceId(experienceId);
-        proofDocs.forEach(doc -> proofStorageService.delete(doc.getStorageKey()));
         proofDocumentRepository.deleteAll(proofDocs);
         roundRepository.deleteByExperienceId(experienceId);
         reviewLogRepository.deleteByExperienceId(experienceId);
         experienceRepository.delete(experience);
+        // Delete the stored files only after the whole delete commits — if the tx rolls
+        // back the rows survive and their files must still be on disk (H1).
+        proofDocs.forEach(doc -> deleteFileAfterCommit(doc.getStorageKey()));
     }
 
     /** Pulls a PUBLISHED experience back to DRAFT so its owner can fix it and resubmit
@@ -184,7 +198,7 @@ public class ExperienceService {
         }
         experience.unpublish();
         experienceRepository.save(experience);
-        return toFullResponse(experience);
+        return responseAssembler.toFullResponse(experience);
     }
 
     @Transactional
@@ -196,6 +210,10 @@ public class ExperienceService {
         }
         try (InputStream in = file.getInputStream()) {
             ProofStorageService.StoredFile stored = proofStorageService.store(experienceId, file.getOriginalFilename(), in);
+            // The file is on disk now but the row isn't committed yet — if this tx rolls
+            // back, the ProofDocument row won't exist, so register a compensating delete so
+            // the file doesn't orphan on disk (H1).
+            deleteFileIfRolledBack(stored.storageKey());
             ProofDocument proof = new ProofDocument(
                     UUID.randomUUID(), experienceId, stored.storageKey(), file.getOriginalFilename(),
                     file.getContentType() == null ? "application/octet-stream" : file.getContentType());
@@ -223,19 +241,20 @@ public class ExperienceService {
 
         experience.markPendingReview();
         experienceRepository.save(experience);
-        return toFullResponse(experience);
+        return responseAssembler.toFullResponse(experience);
     }
 
     @Transactional(readOnly = true)
     public List<ExperienceFullResponse> listMine(UUID contributorId) {
-        return experienceRepository.findByContributorIdOrderByCreatedAtDesc(contributorId).stream()
-                .map(this::toFullResponse)
-                .toList();
+        // Batched build — one query each for rounds/proofs/unlock-counts across all of the
+        // contributor's experiences, instead of three per row.
+        return responseAssembler.buildMany(
+                experienceRepository.findByContributorIdOrderByCreatedAtDesc(contributorId));
     }
 
     @Transactional(readOnly = true)
     public ExperienceFullResponse getMine(UUID contributorId, UUID experienceId) {
-        return toFullResponse(getOwned(contributorId, experienceId));
+        return responseAssembler.toFullResponse(getOwned(contributorId, experienceId));
     }
 
     @Transactional(readOnly = true)
@@ -244,7 +263,7 @@ public class ExperienceService {
             int page, int size) {
         Page<Experience> result = experienceRepository.browsePublished(
                 blankToNull(company), blankToNull(roleTitle), blankToNull(level), year, searchPattern(search),
-                PageRequest.of(page, Math.min(size, 100), resolveSort(sort)));
+                PageRequest.of(page, Math.min(size, maxPageSize), resolveSort(sort)));
         List<UUID> ids = result.getContent().stream().map(Experience::getId).toList();
         // An empty IN (...) list is invalid JPQL for most providers — skip the query(ies)
         // entirely for an empty page instead of sending a zero-length list.
@@ -293,7 +312,7 @@ public class ExperienceService {
         }
 
         if (isOwner || viewerIsAdmin || hasPurchased) {
-            return ExperienceViewResponse.fullAccess(toFullResponse(experience));
+            return ExperienceViewResponse.fullAccess(responseAssembler.toFullResponse(experience));
         }
         // Reaching this branch means hasPurchased was false (otherwise we'd be in the
         // fullAccess branch above), so unlocked is always false here.
@@ -353,17 +372,37 @@ public class ExperienceService {
         }
     }
 
-    private ExperienceFullResponse toFullResponse(Experience experience) {
-        List<ExperienceRoundResponse> rounds = roundRepository
-                .findByExperienceIdOrderByRoundNumberAsc(experience.getId()).stream()
-                .map(ExperienceRoundResponse::from)
-                .toList();
-        List<ProofDocumentResponse> proof = proofDocumentRepository
-                .findByExperienceId(experience.getId()).stream()
-                .map(ProofDocumentResponse::from)
-                .toList();
-        long unlockCount = entitlementRepository.countByExperienceId(experience.getId());
-        return ExperienceFullResponse.from(experience, rounds, proof, unlockCount);
+    /** Defers a best-effort file delete until the current transaction commits, so a
+     * rollback never leaves the DB pointing at a file we've already removed. Runs
+     * immediately if there's no active transaction (defensive — callers here are all
+     * @Transactional). */
+    private void deleteFileAfterCommit(String storageKey) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    proofStorageService.delete(storageKey);
+                }
+            });
+        } else {
+            proofStorageService.delete(storageKey);
+        }
+    }
+
+    /** Registers a compensating delete that runs only if the current transaction rolls
+     * back — used right after storing an upload, so a file whose DB row never commits
+     * doesn't orphan on disk. */
+    private void deleteFileIfRolledBack(String storageKey) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    if (status == STATUS_ROLLED_BACK) {
+                        proofStorageService.delete(storageKey);
+                    }
+                }
+            });
+        }
     }
 
     private static String joinTags(List<String> tags) {

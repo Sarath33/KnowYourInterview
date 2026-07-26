@@ -1,71 +1,48 @@
-import { useEffect, useState } from "react";
-import type { ExperienceFull } from "../../../shared/types";
+import { useState } from "react";
 import * as api from "../lib/api";
-import { ApiError } from "../lib/api";
-import { useAuth } from "../context/AuthContext";
+import { useAsync } from "../lib/useAsync";
+import { errorMessage } from "../lib/errors";
 import { CheckIcon, FileTextIcon, XIcon } from "./icons";
 
-function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  return err instanceof Error ? err.message : "Something went wrong";
-}
-
 export function AdminReviewQueue() {
-  const { accessToken } = useAuth();
-  const token = accessToken!;
-  const [queue, setQueue] = useState<ExperienceFull[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, error: loadError, refetch } = useAsync(() => api.adminReviewQueue(), []);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({});
 
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setQueue(await api.adminReviewQueue(token));
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const queue = data ?? [];
+  const error = actionError ?? loadError;
 
   const approve = async (id: string) => {
-    setError(null);
+    setActionError(null);
     try {
-      await api.adminApprove(token, id);
-      await load();
+      await api.adminApprove(id);
+      await refetch();
     } catch (err) {
-      setError(errorMessage(err));
+      setActionError(errorMessage(err));
     }
   };
 
   const reject = async (id: string) => {
     const reason = reasonDrafts[id]?.trim();
     if (!reason) {
-      setError("Enter a rejection reason first");
+      setActionError("Enter a rejection reason first");
       return;
     }
-    setError(null);
+    setActionError(null);
     try {
-      await api.adminReject(token, id, { reason });
-      await load();
+      await api.adminReject(id, { reason });
+      await refetch();
     } catch (err) {
-      setError(errorMessage(err));
+      setActionError(errorMessage(err));
     }
   };
 
   const viewProof = async (experienceId: string, proofId: string) => {
-    setError(null);
+    setActionError(null);
     try {
-      await api.openProof(token, experienceId, proofId);
+      await api.openProof(experienceId, proofId);
     } catch (err) {
-      setError(errorMessage(err));
+      setActionError(errorMessage(err));
     }
   };
 
@@ -79,7 +56,9 @@ export function AdminReviewQueue() {
       </p>
       {error && <p className="error-text" style={{ marginBottom: 16 }}>{error}</p>}
       {loading ? (
-        <p className="muted">Loading…</p>
+        <p className="muted" aria-busy="true" aria-live="polite">
+          Loading…
+        </p>
       ) : queue.length === 0 ? (
         <p className="muted">Nothing pending review.</p>
       ) : (

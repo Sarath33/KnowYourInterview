@@ -9,6 +9,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 @Entity
 @Table(name = "experiences")
@@ -57,7 +58,7 @@ public class Experience {
     private String compensation;
 
     @Column(name = "price_paise", nullable = false)
-    private int pricePaise;
+    private long pricePaise;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
@@ -74,6 +75,12 @@ public class Experience {
 
     @Column(name = "published_at")
     private Instant publishedAt;
+
+    // Optimistic-lock guard against lost updates (concurrent edit/publish/unpublish on the
+    // same experience). Backed by the "version" column added in V4.
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     // Rounds and proof documents are separate aggregates, queried by experienceId via
     // their own repositories rather than mapped as JPA associations here — keeps this
@@ -99,7 +106,7 @@ public class Experience {
             Short overallDifficulty,
             String timeline,
             String compensation,
-            int pricePaise) {
+            long pricePaise) {
         this.id = id;
         this.contributorId = contributorId;
         this.company = company;
@@ -243,7 +250,7 @@ public class Experience {
         return compensation;
     }
 
-    public int getPricePaise() {
+    public long getPricePaise() {
         return pricePaise;
     }
 
