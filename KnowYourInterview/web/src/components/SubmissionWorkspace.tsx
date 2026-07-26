@@ -9,7 +9,6 @@ import type {
 } from "../../../shared/types";
 import * as api from "../lib/api";
 import { ApiError } from "../lib/api";
-import { useAuth } from "../context/AuthContext";
 import { StatusTag } from "./tags";
 import { FileTextIcon, PlusIcon } from "./icons";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -716,7 +715,6 @@ function EditHistoryEntry({ snapshot }: { snapshot: ExperienceEditSnapshot }) {
 }
 
 export function SubmissionWorkspace() {
-  const { accessToken } = useAuth();
   const [experiences, setExperiences] = useState<ExperienceFull[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -729,8 +727,6 @@ export function SubmissionWorkspace() {
     "kyi:draft:new-submission",
   );
   const [showRestoredNotice, setShowRestoredNotice] = useState(false);
-
-  const token = accessToken!;
 
   // Only while actually composing a new draft — otherwise this would keep overwriting
   // the saved draft with emptyForm/[] every time creating is false (e.g. while a
@@ -747,7 +743,7 @@ export function SubmissionWorkspace() {
     setLoading(true);
     setError(null);
     try {
-      const mine = await api.listMyExperiences(token);
+      const mine = await api.listMyExperiences();
       setExperiences(mine);
     } catch (err) {
       setError(errorMessage(err));
@@ -771,14 +767,14 @@ export function SubmissionWorkspace() {
       return;
     }
     try {
-      const created = await api.createExperience(token, form);
+      const created = await api.createExperience(form);
       // The draft exists now — add any rounds queued up before creation. If one fails,
       // the draft itself is safe (already saved); surface the error after reloading and
       // still land on the draft so the rest can be added there directly.
       let roundError: string | null = null;
       for (const round of pendingRounds) {
         try {
-          await api.addRound(token, created.id, round);
+          await api.addRound(created.id, round);
         } catch (err) {
           roundError = `Draft created, but adding a round failed: ${errorMessage(err)}. You can add the rest from the draft.`;
           break;
@@ -1024,7 +1020,6 @@ export function SubmissionWorkspace() {
                 // whichever submission was previously selected instead of resetting.
                 key={selected.id}
                 experience={selected}
-                token={token}
                 onChanged={load}
                 onDeleted={() => {
                   setSelectedId(null);
@@ -1041,12 +1036,10 @@ export function SubmissionWorkspace() {
 
 function SubmissionDetail({
   experience,
-  token,
   onChanged,
   onDeleted,
 }: {
   experience: ExperienceFull;
-  token: string;
   onChanged: () => void;
   onDeleted: () => void;
 }) {
@@ -1074,19 +1067,19 @@ function SubmissionDetail({
   const isDraftOrRejected = experience.status === "DRAFT" || experience.status === "REJECTED";
 
   const handleAddRound = async (round: RoundRequest) => {
-    await api.addRound(token, experience.id, round);
+    await api.addRound(experience.id, round);
     onChanged();
   };
 
   const handleUpdateRound = async (roundId: string, round: RoundRequest) => {
-    await api.updateRound(token, experience.id, roundId, round);
+    await api.updateRound(experience.id, roundId, round);
     setEditingRoundId(null);
     onChanged();
   };
 
   const handleDeleteRound = async (roundId: string) => {
     try {
-      await api.deleteRound(token, experience.id, roundId);
+      await api.deleteRound(experience.id, roundId);
       onChanged();
     } catch (err) {
       setError(errorMessage(err));
@@ -1095,7 +1088,7 @@ function SubmissionDetail({
 
   const handleDeleteProof = async (proofId: string) => {
     try {
-      await api.deleteProofDocument(token, experience.id, proofId);
+      await api.deleteProofDocument(experience.id, proofId);
       onChanged();
     } catch (err) {
       setError(errorMessage(err));
@@ -1105,7 +1098,7 @@ function SubmissionDetail({
   const handleViewProof = async (proofId: string) => {
     setError(null);
     try {
-      await api.openProof(token, experience.id, proofId);
+      await api.openProof(experience.id, proofId);
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -1116,7 +1109,7 @@ function SubmissionDetail({
     if (!file) return;
     setError(null);
     try {
-      await api.uploadProof(token, experience.id, file);
+      await api.uploadProof(experience.id, file);
       onChanged();
     } catch (err) {
       setError(errorMessage(err));
@@ -1128,7 +1121,7 @@ function SubmissionDetail({
   const handleSubmit = async () => {
     setError(null);
     try {
-      await api.submitExperience(token, experience.id);
+      await api.submitExperience(experience.id);
       onChanged();
     } catch (err) {
       setError(errorMessage(err));
@@ -1139,7 +1132,7 @@ function SubmissionDetail({
     setError(null);
     setDeleting(true);
     try {
-      await api.deleteExperience(token, experience.id);
+      await api.deleteExperience(experience.id);
       onDeleted();
     } catch (err) {
       setError(errorMessage(err));
@@ -1150,7 +1143,7 @@ function SubmissionDetail({
   const handleUnpublish = async () => {
     setError(null);
     try {
-      await api.unpublishExperience(token, experience.id);
+      await api.unpublishExperience(experience.id);
       onChanged();
     } catch (err) {
       setError(errorMessage(err));
@@ -1158,7 +1151,7 @@ function SubmissionDetail({
   };
 
   const handleUpdateDetails = async (body: ExperienceRequest) => {
-    await api.updateExperience(token, experience.id, body);
+    await api.updateExperience(experience.id, body);
     setEditingDetails(false);
     onChanged();
   };
@@ -1173,7 +1166,7 @@ function SubmissionDetail({
       setHistoryLoading(true);
       setHistoryError(null);
       try {
-        setHistory(await api.getEditHistory(token, experience.id));
+        setHistory(await api.getEditHistory(experience.id));
       } catch (err) {
         setHistoryError(errorMessage(err));
       } finally {
