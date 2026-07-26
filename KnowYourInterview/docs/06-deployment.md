@@ -97,9 +97,13 @@ endpoint, no per-login network round-trip. `AuthService.googleLogin` then finds-
 user: matches an existing linked Google account first, falls back to linking a Google sign-in
 to an existing email/password account with the same *verified* email (so registering normally
 and later using "Sign in with Google" doesn't create a duplicate account), and only creates a
-brand-new password-less account if neither matches. See `V2__add_google_auth.sql` — `users`
+brand-new password-less account if neither matches. See `V6__add_google_auth.sql` — `users`
 gained a nullable `google_sub` column and `password_hash` became nullable (Google-only
 accounts have no password).
+
+<!-- deploy-sync-check: 2026-07-26T12:45Z — trivial marker to confirm Railway is
+     building the actual latest commit on main, not a stale cached one. Safe to remove
+     once confirmed; harmless if left in place. -->
 
 ## Promoting the first admin
 
