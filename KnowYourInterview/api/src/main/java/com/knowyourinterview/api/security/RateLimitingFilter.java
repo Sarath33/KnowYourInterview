@@ -38,7 +38,11 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             "/api/v1/auth/login", new Limit(10, Duration.ofMinutes(1)),
             "/api/v1/auth/register", new Limit(5, Duration.ofMinutes(1)),
             "/api/v1/auth/forgot-password", new Limit(5, Duration.ofMinutes(1)),
-            "/api/v1/auth/reset-password", new Limit(10, Duration.ofMinutes(1)));
+            "/api/v1/auth/reset-password", new Limit(10, Duration.ofMinutes(1)),
+            // Same bucket size as login — verifying a Google ID token is cheap (no network
+            // round-trip once Google's JWKS is cached) but this endpoint can still create a
+            // new account per call, same abuse shape as /register.
+            "/api/v1/auth/google", new Limit(10, Duration.ofMinutes(1)));
 
     private final StringRedisTemplate redisTemplate;
 

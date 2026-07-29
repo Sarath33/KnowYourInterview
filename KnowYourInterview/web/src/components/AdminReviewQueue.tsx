@@ -71,6 +71,18 @@ export function AdminReviewQueue() {
               <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.5, margin: "10px 0" }}>
                 {exp.teaser}
               </p>
+              {exp.sourceUrl && (
+                <p style={{ fontSize: 13, color: "var(--text-secondary-2)", margin: "0 0 10px" }}>
+                  <span className="tag tag-neutral" style={{ marginRight: 8 }}>
+                    Reference — free
+                  </span>
+                  Summarized from{" "}
+                  <a href={exp.sourceUrl} target="_blank" rel="noopener noreferrer">
+                    {exp.sourceName || exp.sourceUrl}
+                  </a>{" "}
+                  — verify the source before approving.
+                </p>
+              )}
               <p style={{ fontSize: 13, color: "var(--text-secondary-2)", fontWeight: 600 }}>
                 {exp.rounds.length} round(s), {exp.proofDocuments.length} proof document(s)
               </p>
