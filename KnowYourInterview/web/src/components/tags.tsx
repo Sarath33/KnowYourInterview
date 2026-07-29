@@ -16,15 +16,6 @@ export function UnlockedTag() {
   return <span className="tag tag-success">Unlocked</span>;
 }
 
-/** Shown on a contributor's own free submission (no sourceUrl) — distinguishes it from an
- * admin-authored "reference a public source" submission, which is also free but did go
- * through the normal admin review pipeline. Free contributions skip review entirely (see
- * ExperienceService#submitForReview), so viewers should be able to tell the two apart at a
- * glance instead of both just looking like "Free". */
-export function UnreviewedTag() {
-  return <span className="tag tag-warning">Unreviewed</span>;
-}
-
 const STATUS_LABEL: Record<ExperienceStatus, string> = {
   DRAFT: "Draft",
   PENDING_REVIEW: "Pending review",

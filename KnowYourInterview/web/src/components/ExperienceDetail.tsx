@@ -5,7 +5,7 @@ import { startCheckout } from "../lib/razorpay";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../lib/useAsync";
 import { errorMessage } from "../lib/errors";
-import { OutcomeTag, RemoteTag, UnreviewedTag } from "./tags";
+import { OutcomeTag, RemoteTag } from "./tags";
 import { ArrowLeftIcon, LockIcon } from "./icons";
 import { formatPaise, interviewedLabel, levelLine, roundCountLabel } from "../lib/format";
 
@@ -204,10 +204,6 @@ function FullExperience({
       <div className="row" style={{ gap: 8, marginBottom: recency ? 8 : 24 }}>
         <OutcomeTag outcome={full.outcome} />
         {full.isRemote && <RemoteTag />}
-        {/* Free with no sourceUrl = the contributor's own free contribution, which skipped
-            admin review entirely (see ExperienceService#submitForReview) — flag it so it
-            doesn't read as equally vetted as a reviewed (paid, or admin reference) write-up. */}
-        {full.isFree && !full.sourceUrl && <UnreviewedTag />}
       </div>
       {(recency || full.publishedAt || full.isFree) && (
         <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 24 }}>

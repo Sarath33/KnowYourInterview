@@ -22,15 +22,27 @@ RUN ./mvnw -B package -DskipTests
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
-# Runs as non-root.
-RUN addgroup -S kyi && adduser -S kyi -G kyi
+# Runs as non-root at the process level (see entrypoint.sh) — but the image build and
+# container start still need root briefly, because Railway attaches the /app/uploads/proof
+# persistent volume at container start, owned by root, which shadows whatever ownership
+# was baked into the image at that path. So we can no longer just `USER kyi` here and be
+# done: the entrypoint fixes ownership of the *mounted* volume at every boot, then drops
+# privileges via su-exec before exec'ing java. See entrypoint.sh for the detail.
+RUN addgroup -S kyi && adduser -S kyi -G kyi \
+    && apk add --no-cache su-exec
+
 COPY --from=build /build/target/know-your-interview-api-*.jar app.jar
 RUN mkdir -p /app/uploads/proof && chown -R kyi:kyi /app
-USER kyi
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Railway sets PORT at runtime; server.port in application.yml defaults to 8080 for
 # local dev. Bind Spring's server.port to whatever Railway hands us.
 ENV PROOF_STORAGE_DIR=/app/uploads/proof
 EXPOSE 8080
 
-ENTRYPOINT ["sh", "-c", "java -jar app.jar --server.port=${PORT:-8080}"]
+# Deliberately no USER directive here — the container must start as root so the
+# entrypoint can chown the freshly-mounted volume. entrypoint.sh drops to the
+# unprivileged kyi user via su-exec before running the actual JVM.
+ENTRYPOINT ["/entrypoint.sh"]

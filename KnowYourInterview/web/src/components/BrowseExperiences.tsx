@@ -4,7 +4,7 @@ import type { ExperienceOutcome } from "../../../shared/types";
 import * as api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../lib/useAsync";
-import { OutcomeTag, RemoteTag, UnlockedTag, UnreviewedTag } from "./tags";
+import { OutcomeTag, RemoteTag, UnlockedTag } from "./tags";
 import { ArrowRightIcon } from "./icons";
 import { formatPaise, interviewedLabel, levelLine, roundCountLabel } from "../lib/format";
 
@@ -210,10 +210,6 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
                     {exp.isRemote && <RemoteTag />}
                     <span className="tag tag-neutral">{roundCountLabel(exp.roundCount)}</span>
                     {exp.unlocked && <UnlockedTag />}
-                    {/* Free with no sourceUrl = a contributor's own free contribution, which
-                        skipped admin review entirely — flag it so it doesn't look identical
-                        to a fully reviewed (paid, or admin reference) experience. */}
-                    {exp.isFree && !exp.sourceUrl && <UnreviewedTag />}
                   </div>
                   {recency && (
                     <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{recency}</div>
