@@ -1471,7 +1471,11 @@ function SubmissionDetail({
       </div>
       {isContentEditable && (
         <div style={{ marginTop: 12 }}>
-          <input type="file" onChange={handleUpload} />
+          <input
+            type="file"
+            accept="application/pdf,image/png,image/jpeg,image/webp,image/heic,image/heif"
+            onChange={handleUpload}
+          />
         </div>
       )}
 

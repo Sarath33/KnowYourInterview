@@ -17,6 +17,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import com.knowyourinterview.api.auth.dto.AuthResponse;
+import com.knowyourinterview.api.common.NotFoundException;
 import com.knowyourinterview.api.security.JwtService;
 import com.knowyourinterview.api.user.PasswordResetToken;
 import com.knowyourinterview.api.user.PasswordResetTokenRepository;
@@ -42,6 +43,7 @@ import static org.mockito.Mockito.when;
 class AuthServiceTest {
 
     private static final long PASSWORD_RESET_TTL_MINUTES = 30;
+    private static final String ADMIN_BOOTSTRAP_SECRET = "test-bootstrap-secret";
 
     @Mock
     private UserRepository userRepository;
@@ -69,7 +71,8 @@ class AuthServiceTest {
                 jwtService,
                 redisTemplate,
                 PASSWORD_RESET_TTL_MINUTES,
-                googleIdTokenVerifierPort);
+                googleIdTokenVerifierPort,
+                ADMIN_BOOTSTRAP_SECRET);
     }
 
     private void stubTokenIssuance() {
@@ -329,5 +332,55 @@ class AuthServiceTest {
                 .isInstanceOf(InvalidTokenException.class);
 
         verify(userRepository, never()).save(any());
+    }
+
+    // --- bootstrapAdmin ---
+
+    @Test
+    void bootstrapAdminPromotesAnExistingUserWithTheCorrectSecret() {
+        User user = new User(UUID.randomUUID(), "jane@example.com", "hashed-pw", "Jane");
+        when(userRepository.findByEmailIgnoreCase("jane@example.com")).thenReturn(Optional.of(user));
+
+        authService.bootstrapAdmin("jane@example.com", ADMIN_BOOTSTRAP_SECRET);
+
+        assertThat(user.isAdmin()).isTrue();
+        verify(userRepository).save(user);
+    }
+
+    @Test
+    void bootstrapAdminRejectsTheWrongSecretWithoutPromotingAnyone() {
+        assertThatThrownBy(() -> authService.bootstrapAdmin("jane@example.com", "wrong-secret"))
+                .isInstanceOf(InvalidTokenException.class);
+
+        verify(userRepository, never()).findByEmailIgnoreCase(anyString());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void bootstrapAdminRejectsAnUnknownEmail() {
+        when(userRepository.findByEmailIgnoreCase("ghost@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> authService.bootstrapAdmin("ghost@example.com", ADMIN_BOOTSTRAP_SECRET))
+                .isInstanceOf(NotFoundException.class);
+
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void bootstrapAdminIsDisabledWhenNoSecretIsConfigured() {
+        AuthService noSecretConfigured = new AuthService(
+                userRepository,
+                passwordResetTokenRepository,
+                passwordEncoder,
+                jwtService,
+                redisTemplate,
+                PASSWORD_RESET_TTL_MINUTES,
+                googleIdTokenVerifierPort,
+                ""); // blank = disabled, same graceful-degradation pattern as Google/Razorpay/Sentry
+
+        assertThatThrownBy(() -> noSecretConfigured.bootstrapAdmin("jane@example.com", "anything"))
+                .isInstanceOf(AdminBootstrapNotConfiguredException.class);
+
+        verify(userRepository, never()).findByEmailIgnoreCase(anyString());
     }
 }

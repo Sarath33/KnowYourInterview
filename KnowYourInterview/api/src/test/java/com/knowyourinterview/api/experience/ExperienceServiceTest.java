@@ -536,6 +536,32 @@ class ExperienceServiceTest {
     }
 
     @Test
+    void uploadProofRejectsADisallowedContentType() {
+        Experience experience = draftOwnedByContributor();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        MockMultipartFile file =
+                new MockMultipartFile("file", "offer.exe", "application/x-msdownload", "content".getBytes());
+        assertThatThrownBy(() -> service.uploadProof(contributorId, experience.getId(), file))
+                .isInstanceOf(InvalidStateException.class);
+        verify(proofDocumentRepository, never()).save(any());
+        verify(proofStorageService, never()).store(any(), any(), any());
+    }
+
+    @Test
+    void uploadProofAllowsAJpegImage() {
+        Experience experience = draftOwnedByContributor();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        when(proofStorageService.store(eq(experience.getId()), eq("offer.jpg"), any(InputStream.class)))
+                .thenReturn(new ProofStorageService.StoredFile("some/key.jpg", 1024L));
+
+        MockMultipartFile file = new MockMultipartFile("file", "offer.jpg", "image/jpeg", "content".getBytes());
+        var response = service.uploadProof(contributorId, experience.getId(), file);
+
+        assertThat(response.fileName()).isEqualTo("offer.jpg");
+    }
+
+    @Test
     void uploadProofRejectsAPublishedExperience() {
         Experience experience = draftOwnedByContributor();
         experience.markPendingReview();
@@ -756,10 +782,10 @@ class ExperienceServiceTest {
         experience.markPendingReview();
         experience.publish();
         Page<Experience> page = new PageImpl<>(List.of(experience), PageRequest.of(0, 20, NEWEST_SORT), 1);
-        when(experienceRepository.browsePublished(null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
+        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
                 .thenReturn(page);
 
-        var response = service.browsePublished(null, null, null, null, null, null, "newest", 0, 20);
+        var response = service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 20);
 
         assertThat(response.items()).hasSize(1);
         assertThat(response.totalItems()).isEqualTo(1);
@@ -771,14 +797,14 @@ class ExperienceServiceTest {
         experience.markPendingReview();
         experience.publish();
         Page<Experience> page = new PageImpl<>(List.of(experience), PageRequest.of(0, 20, NEWEST_SORT), 1);
-        when(experienceRepository.browsePublished(null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
+        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
                 .thenReturn(page);
         ExperienceRoundRepository.ExperienceRoundCount count = mock(ExperienceRoundRepository.ExperienceRoundCount.class);
         when(count.getExperienceId()).thenReturn(experience.getId());
         when(count.getRoundCount()).thenReturn(3L);
         when(roundRepository.countByExperienceIdIn(List.of(experience.getId()))).thenReturn(List.of(count));
 
-        var response = service.browsePublished(null, null, null, null, null, null, "newest", 0, 20);
+        var response = service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 20);
 
         assertThat(response.items().get(0).roundCount()).isEqualTo(3);
     }
@@ -791,11 +817,11 @@ class ExperienceServiceTest {
         experience.markPendingReview();
         experience.publish();
         Page<Experience> page = new PageImpl<>(List.of(experience), PageRequest.of(0, 20, NEWEST_SORT), 1);
-        when(experienceRepository.browsePublished(null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
+        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
                 .thenReturn(page);
         when(roundRepository.countByExperienceIdIn(List.of(experience.getId()))).thenReturn(List.of());
 
-        var response = service.browsePublished(null, null, null, null, null, null, "newest", 0, 20);
+        var response = service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 20);
 
         assertThat(response.items().get(0).roundCount()).isZero();
     }
@@ -803,10 +829,10 @@ class ExperienceServiceTest {
     @Test
     void browsePublishedSkipsRoundCountQueryForAnEmptyPage() {
         Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
+        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
                 .thenReturn(page);
 
-        var response = service.browsePublished(null, null, null, null, null, null, "newest", 0, 20);
+        var response = service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 20);
 
         assertThat(response.items()).isEmpty();
         verify(roundRepository, never()).countByExperienceIdIn(any());
@@ -815,69 +841,81 @@ class ExperienceServiceTest {
     @Test
     void browsePublishedCapsPageSizeAtOneHundred() {
         Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 100, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), eq(PageRequest.of(0, 100, NEWEST_SORT))))
+        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 100, NEWEST_SORT))))
                 .thenReturn(page);
 
-        service.browsePublished(null, null, null, null, null, null, "newest", 0, 500);
+        service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 500);
 
         verify(experienceRepository).browsePublished(
-                eq(null), eq(null), eq(null), eq(null), eq(null), eq(PageRequest.of(0, 100, NEWEST_SORT)));
+                eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(PageRequest.of(0, 100, NEWEST_SORT)));
     }
 
     @Test
     void browsePublishedTreatsBlankFiltersAsNull() {
         Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(eq(null), eq(null), eq(null), eq(null), eq(null), any()))
+        when(experienceRepository.browsePublished(eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), any()))
                 .thenReturn(page);
 
-        service.browsePublished(null, "  ", "", null, null, "  ", "newest", 0, 20);
+        service.browsePublished(null, "  ", "", null, null, null, "  ", "newest", 0, 20);
 
-        verify(experienceRepository).browsePublished(eq(null), eq(null), eq(null), eq(null), eq(null), any());
+        verify(experienceRepository).browsePublished(eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), any());
     }
 
     @Test
     void browsePublishedBuildsALowercasedWildcardSearchPattern() {
         Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any())).thenReturn(page);
+        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), any())).thenReturn(page);
 
-        service.browsePublished(null, null, null, null, null, "Backend Eng", "newest", 0, 20);
+        service.browsePublished(null, null, null, null, null, null, "Backend Eng", "newest", 0, 20);
 
-        verify(experienceRepository).browsePublished(eq(null), eq(null), eq(null), eq(null), eq("%backend eng%"), any());
+        verify(experienceRepository).browsePublished(
+                eq(null), eq(null), eq(null), eq(null), eq(null), eq("%backend eng%"), any());
+    }
+
+    @Test
+    void browsePublishedPassesTheOutcomeFilterThrough() {
+        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
+        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), any())).thenReturn(page);
+
+        service.browsePublished(null, null, null, null, null, ExperienceOutcome.OFFER, null, "newest", 0, 20);
+
+        verify(experienceRepository).browsePublished(
+                eq(null), eq(null), eq(null), eq(null), eq(ExperienceOutcome.OFFER), eq(null), any());
     }
 
     @Test
     void browsePublishedSortsByPriceLowWhenRequested() {
         Sort priceLowSort = Sort.by(Sort.Direction.ASC, "pricePaise");
         Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, priceLowSort), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceLowSort))))
+        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceLowSort))))
                 .thenReturn(page);
 
-        service.browsePublished(null, null, null, null, null, null, "priceLow", 0, 20);
+        service.browsePublished(null, null, null, null, null, null, null, "priceLow", 0, 20);
 
-        verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceLowSort)));
+        verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceLowSort)));
     }
 
     @Test
     void browsePublishedSortsByPriceHighWhenRequested() {
         Sort priceHighSort = Sort.by(Sort.Direction.DESC, "pricePaise");
         Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, priceHighSort), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceHighSort))))
+        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceHighSort))))
                 .thenReturn(page);
 
-        service.browsePublished(null, null, null, null, null, null, "priceHigh", 0, 20);
+        service.browsePublished(null, null, null, null, null, null, null, "priceHigh", 0, 20);
 
-        verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceHighSort)));
+        verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceHighSort)));
     }
 
     @Test
     void browsePublishedFallsBackToNewestForAnUnrecognizedSortValue() {
         Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, NEWEST_SORT))))
+        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, NEWEST_SORT))))
                 .thenReturn(page);
 
-        service.browsePublished(null, null, null, null, null, null, "bogus", 0, 20);
+        service.browsePublished(null, null, null, null, null, null, null, "bogus", 0, 20);
 
-        verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, NEWEST_SORT)));
+        verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, NEWEST_SORT)));
     }
 
     @Test
@@ -886,10 +924,10 @@ class ExperienceServiceTest {
         experience.markPendingReview();
         experience.publish();
         Page<Experience> page = new PageImpl<>(List.of(experience), PageRequest.of(0, 20, NEWEST_SORT), 1);
-        when(experienceRepository.browsePublished(null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
+        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
                 .thenReturn(page);
 
-        var response = service.browsePublished(null, null, null, null, null, null, "newest", 0, 20);
+        var response = service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 20);
 
         assertThat(response.items().get(0).unlocked()).isFalse();
         verify(entitlementRepository, never()).findExperienceIdsByUserIdAndExperienceIdIn(any(), any());
@@ -905,13 +943,13 @@ class ExperienceServiceTest {
         locked.publish();
         UUID viewerId = UUID.randomUUID();
         Page<Experience> page = new PageImpl<>(List.of(unlocked, locked), PageRequest.of(0, 20, NEWEST_SORT), 2);
-        when(experienceRepository.browsePublished(null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
+        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
                 .thenReturn(page);
         when(entitlementRepository.findExperienceIdsByUserIdAndExperienceIdIn(
                         eq(viewerId), eq(List.of(unlocked.getId(), locked.getId()))))
                 .thenReturn(List.of(unlocked.getId()));
 
-        var response = service.browsePublished(viewerId, null, null, null, null, null, "newest", 0, 20);
+        var response = service.browsePublished(viewerId, null, null, null, null, null, null, "newest", 0, 20);
 
         assertThat(response.items().get(0).unlocked()).isTrue();
         assertThat(response.items().get(1).unlocked()).isFalse();
@@ -920,10 +958,10 @@ class ExperienceServiceTest {
     @Test
     void browsePublishedSkipsEntitlementQueryForAnEmptyPage() {
         Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
+        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
                 .thenReturn(page);
 
-        service.browsePublished(UUID.randomUUID(), null, null, null, null, null, "newest", 0, 20);
+        service.browsePublished(UUID.randomUUID(), null, null, null, null, null, null, "newest", 0, 20);
 
         verify(entitlementRepository, never()).findExperienceIdsByUserIdAndExperienceIdIn(any(), any());
     }

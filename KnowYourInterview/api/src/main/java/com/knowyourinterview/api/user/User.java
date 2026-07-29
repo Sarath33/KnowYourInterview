@@ -100,6 +100,14 @@ public class User {
         this.updatedAt = Instant.now();
     }
 
+    /** See AuthService#bootstrapAdmin — the one path to ROLE_ADMIN that isn't a direct
+     * database update, gated by the ADMIN_BOOTSTRAP_SECRET env var rather than by already
+     * being an admin (there wouldn't be one yet the first time this is used). */
+    public void promoteToAdmin() {
+        this.admin = true;
+        this.updatedAt = Instant.now();
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }

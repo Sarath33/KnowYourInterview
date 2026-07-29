@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import type { ExperienceOutcome } from "../../../shared/types";
 import * as api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../lib/useAsync";
@@ -14,10 +15,17 @@ interface Filters {
   roleTitle: string;
   level: string;
   year: string;
+  outcome: ExperienceOutcome | "";
   search: string;
 }
 
-const emptyFilters: Filters = { company: "", roleTitle: "", level: "", year: "", search: "" };
+const emptyFilters: Filters = { company: "", roleTitle: "", level: "", year: "", outcome: "", search: "" };
+
+const OUTCOME_LABELS: Record<ExperienceOutcome, string> = {
+  OFFER: "Offer",
+  REJECTED: "Rejected",
+  WITHDRAWN: "Withdrawn",
+};
 
 type SortOption = "newest" | "priceLow" | "priceHigh";
 
@@ -44,6 +52,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
         roleTitle: appliedFilters.roleTitle || undefined,
         level: appliedFilters.level || undefined,
         year: appliedFilters.year ? Number(appliedFilters.year) : undefined,
+        outcome: appliedFilters.outcome || undefined,
         search: appliedFilters.search || undefined,
         sort,
         page,
@@ -68,7 +77,8 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
     setPage(0);
   };
 
-  const hasFilters = filters.company || filters.roleTitle || filters.level || filters.year || filters.search;
+  const hasFilters =
+    filters.company || filters.roleTitle || filters.level || filters.year || filters.outcome || filters.search;
 
   return (
     <div>
@@ -150,6 +160,20 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
           className="text-input"
           style={{ width: 110 }}
         />
+        <select
+          aria-label="Outcome"
+          value={filters.outcome}
+          onChange={(e) => setFilters({ ...filters, outcome: e.target.value as ExperienceOutcome | "" })}
+          className="select"
+          style={{ width: 150 }}
+        >
+          <option value="">Any outcome</option>
+          {(Object.keys(OUTCOME_LABELS) as ExperienceOutcome[]).map((o) => (
+            <option key={o} value={o}>
+              {OUTCOME_LABELS[o]}
+            </option>
+          ))}
+        </select>
         <button type="submit" className="btn btn-outline">
           Filter
         </button>

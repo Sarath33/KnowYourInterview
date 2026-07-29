@@ -43,6 +43,7 @@ Set on the `api` service (Railway reference-variable syntax resolves these from 
 | `CORS_ALLOWED_ORIGINS` | `https://web-production-b94af.up.railway.app` | See `SecurityConfig.java` — comma-separated if it ever needs more than one origin. |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | *(not set)* | Payments are effectively disabled until these are added — see Known gaps. |
 | `GOOGLE_CLIENT_ID` | *(not set)* | Enables "Sign in with Google" (`POST /api/v1/auth/google`) when set — same graceful-degradation pattern as Razorpay above; the endpoint returns 503 until this is added. See "Setting up Google Sign-In" below. |
+| `ADMIN_BOOTSTRAP_SECRET` | *(generated)* | Enables `POST /api/v1/auth/bootstrap-admin` (`{email, secret}` → promotes an existing, already-registered account to admin) — same graceful-degradation pattern, 503 until set. Exists to solve the chicken-and-egg problem of minting the very first admin on a fresh environment without direct DB access. Rate-limited (5/min/IP) and compared with a constant-time check; rotate/unset it once you have your first admin. |
 
 Set on the `Postgres` service:
 

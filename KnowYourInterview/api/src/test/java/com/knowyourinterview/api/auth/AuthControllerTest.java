@@ -20,6 +20,7 @@ import com.knowyourinterview.api.security.JwtService;
 import com.knowyourinterview.api.security.SecurityConfig;
 
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -123,5 +124,42 @@ class AuthControllerTest {
                                 {"email":"anyone@example.com"}
                                 """))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void bootstrapAdminReturns200OnSuccess() throws Exception {
+        mockMvc.perform(post("/api/v1/auth/bootstrap-admin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"jane@example.com","secret":"the-real-secret"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("jane@example.com is now an admin."));
+    }
+
+    @Test
+    void bootstrapAdminReturns503WhenNotConfigured() throws Exception {
+        doThrow(new AdminBootstrapNotConfiguredException())
+                .when(authService).bootstrapAdmin(anyString(), anyString());
+
+        mockMvc.perform(post("/api/v1/auth/bootstrap-admin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"jane@example.com","secret":"anything"}
+                                """))
+                .andExpect(status().isServiceUnavailable());
+    }
+
+    @Test
+    void bootstrapAdminReturns401OnWrongSecret() throws Exception {
+        doThrow(new InvalidTokenException("Invalid bootstrap secret"))
+                .when(authService).bootstrapAdmin(anyString(), anyString());
+
+        mockMvc.perform(post("/api/v1/auth/bootstrap-admin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"email":"jane@example.com","secret":"wrong"}
+                                """))
+                .andExpect(status().isUnauthorized());
     }
 }

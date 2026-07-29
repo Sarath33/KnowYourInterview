@@ -50,6 +50,13 @@ public class ExperienceService {
     private final int defaultPricePaise;
     private final int maxPageSize;
 
+    /** Proof documents are offer letters / interview invites — PDFs and photos of physical
+     * documents cover the real-world cases. Anything else (executables, scripts, archives)
+     * is rejected outright rather than trusting the client-supplied content type alone;
+     * this is a defense-in-depth allow-list, not a full file-sniffing check. */
+    private static final Set<String> ALLOWED_PROOF_CONTENT_TYPES = Set.of(
+            "application/pdf", "image/png", "image/jpeg", "image/webp", "image/heic", "image/heif");
+
     public ExperienceService(
             ExperienceRepository experienceRepository,
             ExperienceRoundRepository roundRepository,
@@ -288,6 +295,11 @@ public class ExperienceService {
         if (file.isEmpty()) {
             throw new InvalidStateException("Uploaded file is empty");
         }
+        String contentType = file.getContentType();
+        if (contentType == null || !ALLOWED_PROOF_CONTENT_TYPES.contains(contentType.toLowerCase(java.util.Locale.ROOT))) {
+            throw new InvalidStateException(
+                    "Unsupported file type — upload a PDF or an image (PNG, JPEG, WEBP, HEIC)");
+        }
         try (InputStream in = file.getInputStream()) {
             ProofStorageService.StoredFile stored = proofStorageService.store(experienceId, file.getOriginalFilename(), in);
             // The file is on disk now but the row isn't committed yet — if this tx rolls
@@ -353,10 +365,10 @@ public class ExperienceService {
 
     @Transactional(readOnly = true)
     public PagedResponse<ExperienceTeaserResponse> browsePublished(
-            UUID viewerId, String company, String roleTitle, String level, Short year, String search, String sort,
-            int page, int size) {
+            UUID viewerId, String company, String roleTitle, String level, Short year, ExperienceOutcome outcome,
+            String search, String sort, int page, int size) {
         Page<Experience> result = experienceRepository.browsePublished(
-                blankToNull(company), blankToNull(roleTitle), blankToNull(level), year, searchPattern(search),
+                blankToNull(company), blankToNull(roleTitle), blankToNull(level), year, outcome, searchPattern(search),
                 PageRequest.of(page, Math.min(size, maxPageSize), resolveSort(sort)));
         List<UUID> ids = result.getContent().stream().map(Experience::getId).toList();
         // An empty IN (...) list is invalid JPQL for most providers — skip the query(ies)

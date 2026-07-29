@@ -42,7 +42,11 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             // Same bucket size as login — verifying a Google ID token is cheap (no network
             // round-trip once Google's JWKS is cached) but this endpoint can still create a
             // new account per call, same abuse shape as /register.
-            "/api/v1/auth/google", new Limit(10, Duration.ofMinutes(1)));
+            "/api/v1/auth/google", new Limit(10, Duration.ofMinutes(1)),
+            // Tight — this is a brute-forceable secret that grants admin. The endpoint
+            // itself is a constant-time comparison (see AuthService#bootstrapAdmin), but a
+            // rate limit is still the first line of defense against guessing it at all.
+            "/api/v1/auth/bootstrap-admin", new Limit(5, Duration.ofMinutes(1)));
 
     private final StringRedisTemplate redisTemplate;
 

@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.knowyourinterview.api.auth.dto.AuthResponse;
 import com.knowyourinterview.api.auth.dto.UserResponse;
+import com.knowyourinterview.api.common.NotFoundException;
 import com.knowyourinterview.api.security.JwtService;
 import com.knowyourinterview.api.user.PasswordResetToken;
 import com.knowyourinterview.api.user.PasswordResetTokenRepository;
@@ -40,6 +41,7 @@ public class AuthService {
     private final StringRedisTemplate redisTemplate;
     private final Duration passwordResetTtl;
     private final GoogleIdTokenVerifierPort googleIdTokenVerifierPort;
+    private final String adminBootstrapSecret;
 
     public AuthService(
             UserRepository userRepository,
@@ -48,7 +50,8 @@ public class AuthService {
             JwtService jwtService,
             StringRedisTemplate redisTemplate,
             @Value("${app.password-reset.token-ttl-minutes}") long passwordResetTtlMinutes,
-            GoogleIdTokenVerifierPort googleIdTokenVerifierPort) {
+            GoogleIdTokenVerifierPort googleIdTokenVerifierPort,
+            @Value("${app.admin-bootstrap.secret:}") String adminBootstrapSecret) {
         this.userRepository = userRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.passwordEncoder = passwordEncoder;
@@ -56,6 +59,7 @@ public class AuthService {
         this.redisTemplate = redisTemplate;
         this.passwordResetTtl = Duration.ofMinutes(passwordResetTtlMinutes);
         this.googleIdTokenVerifierPort = googleIdTokenVerifierPort;
+        this.adminBootstrapSecret = adminBootstrapSecret;
     }
 
     @Transactional
@@ -104,6 +108,36 @@ public class AuthService {
         }
 
         return issueTokens(user);
+    }
+
+    /**
+     * Promotes an already-registered account to admin, gated by ADMIN_BOOTSTRAP_SECRET
+     * rather than an existing admin's JWT — there's a chicken-and-egg problem the first
+     * time this runs on a fresh environment, since no admin exists yet to authorize one.
+     * Blank/unset secret disables the endpoint entirely (same graceful-degradation pattern
+     * as Google/Razorpay/Sentry). Doesn't create the account — register (or Google
+     * Sign-In) first, then call this once to flip the flag. Not the only way to get an
+     * admin (a direct DB update still works), just the one that doesn't need psql access.
+     */
+    @Transactional
+    public void bootstrapAdmin(String email, String providedSecret) {
+        if (adminBootstrapSecret == null || adminBootstrapSecret.isBlank()) {
+            throw new AdminBootstrapNotConfiguredException();
+        }
+        // Constant-time comparison — this secret is the only thing standing between a
+        // request and creating an admin account, so it shouldn't be distinguishable via
+        // response-time differences the way a naive String.equals early-exit would allow.
+        boolean matches = MessageDigest.isEqual(
+                providedSecret.getBytes(StandardCharsets.UTF_8),
+                adminBootstrapSecret.getBytes(StandardCharsets.UTF_8));
+        if (!matches) {
+            throw new InvalidTokenException("Invalid bootstrap secret");
+        }
+        User user = userRepository.findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new NotFoundException(
+                        "No account found for that email — register (or sign in with Google) first"));
+        user.promoteToAdmin();
+        userRepository.save(user);
     }
 
     public AuthResponse refresh(String refreshToken) {

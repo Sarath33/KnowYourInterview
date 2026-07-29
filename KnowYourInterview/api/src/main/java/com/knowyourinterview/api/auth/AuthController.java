@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.knowyourinterview.api.auth.dto.AuthResponse;
+import com.knowyourinterview.api.auth.dto.BootstrapAdminRequest;
 import com.knowyourinterview.api.auth.dto.ForgotPasswordRequest;
 import com.knowyourinterview.api.auth.dto.GoogleLoginRequest;
 import com.knowyourinterview.api.auth.dto.LoginRequest;
@@ -71,5 +72,15 @@ public class AuthController {
     public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         authService.resetPassword(request.token(), request.newPassword());
         return ResponseEntity.ok(new MessageResponse("Password updated."));
+    }
+
+    // Secret-gated, not JWT-gated — see AuthService#bootstrapAdmin for why (no admin
+    // exists yet to authorize this the first time it's used on a fresh environment).
+    // 503 if ADMIN_BOOTSTRAP_SECRET isn't set; permitAll at the security-filter level like
+    // the rest of /api/v1/auth/**, but rate-limited (see RateLimitingFilter).
+    @PostMapping("/bootstrap-admin")
+    public ResponseEntity<MessageResponse> bootstrapAdmin(@Valid @RequestBody BootstrapAdminRequest request) {
+        authService.bootstrapAdmin(request.email(), request.secret());
+        return ResponseEntity.ok(new MessageResponse(request.email() + " is now an admin."));
     }
 }

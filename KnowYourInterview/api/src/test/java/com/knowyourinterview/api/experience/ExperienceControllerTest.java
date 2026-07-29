@@ -102,7 +102,7 @@ class ExperienceControllerTest {
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, 4, Instant.now(), false,
                 false, null, null);
         when(experienceService.browsePublished(
-                        any(), any(), any(), any(), any(), any(), any(),
+                        any(), any(), any(), any(), any(), any(), any(), any(),
                         org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenReturn(new PagedResponse<>(List.of(teaser), 0, 20, 1, 1));
 

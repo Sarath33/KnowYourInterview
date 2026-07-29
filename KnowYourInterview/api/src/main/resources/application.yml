@@ -104,6 +104,13 @@ app:
     # Client ID from Google Cloud Console (ends in .apps.googleusercontent.com). See
     # docs/06-deployment.md for how to create one.
     client-id: ${GOOGLE_CLIENT_ID:}
+  admin-bootstrap:
+    # Blank = POST /api/v1/auth/bootstrap-admin is disabled (returns 503) — same
+    # graceful-degradation pattern as above. Set to a long random value to promote a
+    # registered account to admin without direct database access: register normally, then
+    # POST {email, secret} to bootstrap-admin. Treat this like any other credential — don't
+    # commit a real value, and consider unsetting it again once you have your first admin.
+    secret: ${ADMIN_BOOTSTRAP_SECRET:}
 
 # Error tracking (sentry.io). Blank DSN = the Sentry Spring Boot starter quietly
 # no-ops (no crashes, no events sent) — same pattern as the Razorpay keys above. Create

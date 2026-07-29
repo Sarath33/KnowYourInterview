@@ -19,6 +19,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
+import com.knowyourinterview.api.auth.AdminBootstrapNotConfiguredException;
 import com.knowyourinterview.api.auth.EmailAlreadyRegisteredException;
 import com.knowyourinterview.api.auth.GoogleAuthNotConfiguredException;
 import com.knowyourinterview.api.auth.InvalidCredentialsException;
@@ -55,6 +56,12 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(GoogleAuthNotConfiguredException.class)
     public ResponseEntity<Map<String, Object>> handleGoogleAuthNotConfigured(GoogleAuthNotConfiguredException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(body(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), null));
+    }
+
+    @ExceptionHandler(AdminBootstrapNotConfiguredException.class)
+    public ResponseEntity<Map<String, Object>> handleAdminBootstrapNotConfigured(AdminBootstrapNotConfiguredException ex) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(body(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), null));
     }
