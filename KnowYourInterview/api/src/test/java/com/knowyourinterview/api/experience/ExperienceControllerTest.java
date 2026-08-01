@@ -55,8 +55,8 @@ class ExperienceControllerTest {
         return new ExperienceFullResponse(
                 UUID.randomUUID(), contributorId, "Acme", "Backend Engineer", "L4", "Remote", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop, focus on systems design.",
-                9900, 0, null, ExperienceStatus.DRAFT, null, null, null, null, null, 0, List.of(), List.of(), true,
-                false, null, null);
+                9900, 0, null, ExperienceStatus.DRAFT, null, null, null, null, null, null, 0, List.of(), List.of(),
+                true, false, null, null, 0L, null);
     }
 
     @Test
@@ -88,7 +88,7 @@ class ExperienceControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"company":"Acme","roleTitle":"Backend Engineer","isRemote":true,
-                                 "outcome":"OFFER","teaser":"Solid loop."}
+                                 "outcome":"OFFER","teaser":"Solid loop.","freeContribution":false}
                                 """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.company").value("Acme"))
@@ -100,7 +100,7 @@ class ExperienceControllerTest {
         ExperienceTeaserResponse teaser = new ExperienceTeaserResponse(
                 UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Remote", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, 4, Instant.now(), false,
-                false, null, null);
+                false, null, null, 0L);
         when(experienceService.browsePublished(
                         any(), any(), any(), any(), any(), any(), any(), any(),
                         org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
@@ -117,7 +117,7 @@ class ExperienceControllerTest {
         ExperienceTeaserResponse teaser = new ExperienceTeaserResponse(
                 id, "Acme", "Backend Engineer", "L4", "Remote", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, 4, Instant.now(), false,
-                false, null, null);
+                false, null, null, 0L);
         when(experienceService.getPublicView(isNull(), eq(false), eq(id)))
                 .thenReturn(ExperienceViewResponse.teaserOnly(teaser));
 

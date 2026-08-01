@@ -93,6 +93,28 @@ public class AdminReviewService {
         return responseAssembler.toFullResponse(experience);
     }
 
+    /** The softer alternative to reject(): the admin thinks this is close, not a hard
+     * "no" — typically called right after the admin has already fixed something directly
+     * via ExperienceService#updateDraft (a separate call; this method only records the
+     * verdict). The contributor sees `notes`, can revise, and resubmits — which clears
+     * correctionNotes and lands back in PENDING_REVIEW, same mechanics as a rejection's
+     * resubmit cycle. See Experience#requestCorrection and ExperienceStatus#CORRECTION_REQUESTED. */
+    @Transactional
+    public ExperienceFullResponse requestCorrection(UUID adminId, UUID experienceId, String notes) {
+        Experience experience = getOrThrow(experienceId);
+        if (experience.getStatus() != ExperienceStatus.PENDING_REVIEW) {
+            throw new InvalidStateException("Only a pending-review experience can have a correction requested");
+        }
+
+        experience.requestCorrection(notes);
+        experienceRepository.save(experience);
+
+        reviewLogRepository.save(new ReviewLog(
+                UUID.randomUUID(), experienceId, adminId, ReviewLog.Action.CORRECTION_REQUESTED, notes));
+
+        return responseAssembler.toFullResponse(experience);
+    }
+
     private Experience getOrThrow(UUID experienceId) {
         return experienceRepository.findById(experienceId)
                 .orElseThrow(() -> new NotFoundException("Experience not found"));

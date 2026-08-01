@@ -23,6 +23,10 @@ export type ExperienceStatus =
   | "PENDING_REVIEW"
   | "APPROVED"
   | "REJECTED"
+  // An admin reviewed the submission, edited it directly and/or left notes on what
+  // still needs fixing, and wants the contributor to revise and resubmit — a softer
+  // verdict than REJECTED. See ExperienceFull.correctionNotes.
+  | "CORRECTION_REQUESTED"
   | "PUBLISHED";
 
 export interface ExperienceRound {
@@ -64,6 +68,10 @@ export interface ExperienceTeaser {
   isFree?: boolean;
   sourceUrl?: string;
   sourceName?: string;
+  /** Raw hit counter — how many times this experience's detail page has been loaded
+   * while published. Not deduped by viewer/session. Public, shown on Browse cards and
+   * the detail page. */
+  viewCount: number;
 }
 
 export interface ExperienceFull extends ExperienceTeaser {
@@ -74,11 +82,19 @@ export interface ExperienceFull extends ExperienceTeaser {
   timeline?: string;
   compensation?: string;
   rejectionReason?: string;
+  /** Set alongside status === "CORRECTION_REQUESTED" — an admin's explanation of what
+   * to fix before resubmitting. Same lifecycle as rejectionReason (cleared on resubmit). */
+  correctionNotes?: string;
   /** How many people hold a real (paid) entitlement — visible to the owner, an admin, or
    * a purchaser (same audience as everything else on this type). Not on the public teaser. */
   unlockCount: number;
   rounds: ExperienceRound[];
   proofDocuments: ProofDocument[];
+  /** Submitter-authored, visible only to the owner and admins — the backend redacts this
+   * to undefined/null for a purchaser or any other viewer who reaches a full response
+   * without being the owner or an admin. Meant for confidential context the submitter
+   * wants an admin reviewer to know, not for public consumption. */
+  confidentialNote?: string;
 }
 
 /** A prior version of an experience's top-level fields, captured right before an edit
@@ -133,6 +149,9 @@ export interface ExperienceRequest {
    * document required, since nobody reviews it). Ignored on an edit, same as sourceUrl/
    * sourceName. Mutually exclusive with sourceUrl — a sourceUrl always wins if both are set. */
   freeContribution?: boolean;
+  /** Editable on both create and edit, unlike sourceUrl/sourceName/freeContribution
+   * above — visible only to the submitter and admins. See ExperienceFull.confidentialNote. */
+  confidentialNote?: string;
 }
 
 export interface RoundRequest {
@@ -147,6 +166,12 @@ export interface RoundRequest {
 
 export interface RejectRequest {
   reason: string;
+}
+
+/** Body for POST /admin/experiences/:id/request-correction — the softer alternative to
+ * reject, pairing with ExperienceStatus "CORRECTION_REQUESTED". */
+export interface CorrectionRequest {
+  notes: string;
 }
 
 export interface PagedResponse<T> {

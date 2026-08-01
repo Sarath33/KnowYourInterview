@@ -16,7 +16,8 @@ public class ReviewLog {
 
     public enum Action {
         APPROVED,
-        REJECTED
+        REJECTED,
+        CORRECTION_REQUESTED
     }
 
     @Id
@@ -49,5 +50,29 @@ public class ReviewLog {
         this.action = action;
         this.reason = reason;
         this.createdAt = Instant.now();
+    }
+
+    public UUID getId() {
+        return id;
+    }
+
+    public UUID getExperienceId() {
+        return experienceId;
+    }
+
+    public UUID getAdminId() {
+        return adminId;
+    }
+
+    public Action getAction() {
+        return action;
+    }
+
+    public String getReason() {
+        return reason;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
     }
 }

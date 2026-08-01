@@ -40,8 +40,15 @@ public class ExperienceResponseAssembler {
         this.entitlementRepository = entitlementRepository;
     }
 
-    /** Single-experience full response — three small per-id lookups. */
+    /** Single-experience full response — three small per-id lookups. Includes
+     * confidentialNote — use the other overload for a viewer who isn't the owner or an
+     * admin (see ExperienceService#getPublicView, the one caller that isn't always
+     * owner/admin). */
     public ExperienceFullResponse toFullResponse(Experience experience) {
+        return toFullResponse(experience, true);
+    }
+
+    public ExperienceFullResponse toFullResponse(Experience experience, boolean includeConfidentialNote) {
         List<ExperienceRoundResponse> rounds = roundRepository
                 .findByExperienceIdOrderByRoundNumberAsc(experience.getId()).stream()
                 .map(ExperienceRoundResponse::from)
@@ -51,7 +58,7 @@ public class ExperienceResponseAssembler {
                 .map(ProofDocumentResponse::from)
                 .toList();
         long unlockCount = entitlementRepository.countByExperienceId(experience.getId());
-        return ExperienceFullResponse.from(experience, rounds, proof, unlockCount);
+        return ExperienceFullResponse.from(experience, rounds, proof, unlockCount, includeConfidentialNote);
     }
 
     /**

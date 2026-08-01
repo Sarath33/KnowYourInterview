@@ -69,6 +69,8 @@ class ExperienceServiceTest {
     private ExperienceResponseAssembler responseAssembler;
     @Mock
     private ExperienceEditSnapshotRepository editSnapshotRepository;
+    @Mock
+    private ExperienceViewRepository experienceViewRepository;
 
     private ExperienceService service;
 
@@ -85,13 +87,30 @@ class ExperienceServiceTest {
         service = new ExperienceService(
                 experienceRepository, roundRepository, proofDocumentRepository,
                 proofStorageService, entitlementRepository, reviewLogRepository, payoutRepository,
-                responseAssembler, editSnapshotRepository, DEFAULT_PRICE_PAISE, MAX_PAGE_SIZE);
+                responseAssembler, editSnapshotRepository, experienceViewRepository,
+                DEFAULT_PRICE_PAISE, MAX_PAGE_SIZE);
+
+        // Default: every recordView call looks like a genuinely new view (return 1, as a
+        // real INSERT ... ON CONFLICT DO NOTHING would for a viewer's first visit) — tests
+        // specifically about the one-per-user dedup override this to return 0 to simulate
+        // a repeat view.
+        lenient().when(experienceViewRepository.recordView(any(), any(), any())).thenReturn(1);
 
         lenient().when(responseAssembler.toFullResponse(any())).thenAnswer(inv -> {
             Experience e = inv.getArgument(0);
             return ExperienceFullResponse.from(e, roundResponsesFor(e), proofResponsesFor(e),
                     entitlementRepository.countByExperienceId(e.getId()));
         });
+        // getPublicView calls the 2-arg overload (to control confidentialNote visibility)
+        // instead of the 1-arg one every other caller uses — needs its own stub or it'd
+        // fall through to Mockito's default null return.
+        lenient().when(responseAssembler.toFullResponse(any(), org.mockito.ArgumentMatchers.anyBoolean()))
+                .thenAnswer(inv -> {
+                    Experience e = inv.getArgument(0);
+                    boolean includeConfidentialNote = inv.getArgument(1);
+                    return ExperienceFullResponse.from(e, roundResponsesFor(e), proofResponsesFor(e),
+                            entitlementRepository.countByExperienceId(e.getId()), includeConfidentialNote);
+                });
         lenient().when(responseAssembler.buildMany(any())).thenAnswer(inv -> {
             List<Experience> experiences = inv.getArgument(0);
             return experiences.stream()
@@ -117,7 +136,7 @@ class ExperienceServiceTest {
         return new ExperienceRequest(
                 "Acme", "Backend Engineer", "L4", "Bengaluru", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Went well overall.",
-                "Practice system design.", (short) 3, "3 weeks", "35 LPA", null, null, false);
+                "Practice system design.", (short) 3, "3 weeks", "35 LPA", null, null, false, null);
     }
 
     private ExperienceRequest referenceRequest() {
@@ -125,28 +144,28 @@ class ExperienceServiceTest {
                 "Acme", "Backend Engineer", "L4", "Bengaluru", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Went well overall.",
                 "Practice system design.", (short) 3, "3 weeks", "35 LPA",
-                "https://example.com/interview-writeup", "Example Blog", false);
+                "https://example.com/interview-writeup", "Example Blog", false, null);
     }
 
     private ExperienceRequest freeContributionRequest() {
         return new ExperienceRequest(
                 "Acme", "Backend Engineer", "L4", "Bengaluru", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Went well overall.",
-                "Practice system design.", (short) 3, "3 weeks", "35 LPA", null, null, true);
+                "Practice system design.", (short) 3, "3 weeks", "35 LPA", null, null, true, null);
     }
 
     private Experience draftOwnedByContributor() {
         return new Experience(
                 UUID.randomUUID(), contributorId, "Acme", "Backend Engineer", "L4", "Bengaluru",
                 true, (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser", "advice",
-                (short) 3, "3 weeks", "35 LPA", DEFAULT_PRICE_PAISE);
+                (short) 3, "3 weeks", "35 LPA", null, DEFAULT_PRICE_PAISE);
     }
 
     private Experience freeContributionDraftOwnedByContributor() {
         Experience experience = new Experience(
                 UUID.randomUUID(), contributorId, "Acme", "Backend Engineer", "L4", "Bengaluru",
                 true, (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser", "advice",
-                (short) 3, "3 weeks", "35 LPA", 0);
+                (short) 3, "3 weeks", "35 LPA", null, 0);
         experience.markAsFreeContribution();
         return experience;
     }
@@ -207,8 +226,8 @@ class ExperienceServiceTest {
         ExperienceRequest updated = new ExperienceRequest(
                 "New Co", "Staff Engineer", "L5", "Remote", true,
                 (short) 7, (short) 2026, ExperienceOutcome.OFFER, "new teaser",
-                "new advice", (short) 4, "2 weeks", "45 LPA", null, null, false);
-        ExperienceFullResponse response = service.updateDraft(contributorId, experience.getId(), updated);
+                "new advice", (short) 4, "2 weeks", "45 LPA", null, null, false, null);
+        ExperienceFullResponse response = service.updateDraft(contributorId, false, experience.getId(), updated);
 
         assertThat(response.company()).isEqualTo("New Co");
         verify(experienceRepository).save(experience);
@@ -219,8 +238,24 @@ class ExperienceServiceTest {
         Experience experience = draftOwnedByContributor();
         when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
 
-        assertThatThrownBy(() -> service.updateDraft(UUID.randomUUID(), experience.getId(), sampleRequest()))
+        assertThatThrownBy(() -> service.updateDraft(UUID.randomUUID(), false, experience.getId(), sampleRequest()))
                 .isInstanceOf(ForbiddenException.class);
+    }
+
+    @Test
+    void updateDraftAllowsAdminToEditAnExperienceTheyDontOwn() {
+        // Part of the correction-requested flow: an admin can fix a submission's fields
+        // directly, not just leave a note. Applied immediately, same as a contributor's
+        // own edit — see AdminReviewService#requestCorrection.
+        Experience experience = draftOwnedByContributor();
+        experience.markPendingReview();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        ExperienceFullResponse response =
+                service.updateDraft(UUID.randomUUID(), true, experience.getId(), sampleRequest());
+
+        assertThat(response.company()).isEqualTo("Acme");
+        verify(experienceRepository).save(experience);
     }
 
     @Test
@@ -228,7 +263,7 @@ class ExperienceServiceTest {
         UUID missingId = UUID.randomUUID();
         when(experienceRepository.findById(missingId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.updateDraft(contributorId, missingId, sampleRequest()))
+        assertThatThrownBy(() -> service.updateDraft(contributorId, false, missingId, sampleRequest()))
                 .isInstanceOf(NotFoundException.class);
     }
 
@@ -238,7 +273,20 @@ class ExperienceServiceTest {
         experience.markPendingReview();
         when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
 
-        ExperienceFullResponse response = service.updateDraft(contributorId, experience.getId(), sampleRequest());
+        ExperienceFullResponse response = service.updateDraft(contributorId, false, experience.getId(), sampleRequest());
+
+        assertThat(response.company()).isEqualTo("Acme");
+        verify(experienceRepository).save(experience);
+    }
+
+    @Test
+    void updateDraftAllowsEditingACorrectionRequestedExperience() {
+        Experience experience = draftOwnedByContributor();
+        experience.markPendingReview();
+        experience.requestCorrection("Please add more detail to the teaser");
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        ExperienceFullResponse response = service.updateDraft(contributorId, false, experience.getId(), sampleRequest());
 
         assertThat(response.company()).isEqualTo("Acme");
         verify(experienceRepository).save(experience);
@@ -251,7 +299,7 @@ class ExperienceServiceTest {
         experience.publish();
         when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
 
-        assertThatThrownBy(() -> service.updateDraft(contributorId, experience.getId(), sampleRequest()))
+        assertThatThrownBy(() -> service.updateDraft(contributorId, false, experience.getId(), sampleRequest()))
                 .isInstanceOf(InvalidStateException.class);
     }
 
@@ -263,7 +311,7 @@ class ExperienceServiceTest {
         return new ExperienceRequest(
                 "Acme", "Backend Engineer", "L4", "Bengaluru", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser",
-                "advice", (short) 3, "3 weeks", "35 LPA", null, null, false);
+                "advice", (short) 3, "3 weeks", "35 LPA", null, null, false, null);
     }
 
     @Test
@@ -271,7 +319,7 @@ class ExperienceServiceTest {
         Experience experience = draftOwnedByContributor();
         when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
 
-        service.updateDraft(contributorId, experience.getId(), sampleRequest());
+        service.updateDraft(contributorId, false, experience.getId(), sampleRequest());
 
         verify(editSnapshotRepository).save(any());
     }
@@ -282,7 +330,7 @@ class ExperienceServiceTest {
         Experience experience = draftOwnedByContributor();
         when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
 
-        service.updateDraft(contributorId, experience.getId(), requestMatchingDraftOwnedByContributor());
+        service.updateDraft(contributorId, false, experience.getId(), requestMatchingDraftOwnedByContributor());
 
         verify(editSnapshotRepository, never()).save(any());
     }
@@ -332,14 +380,16 @@ class ExperienceServiceTest {
         v2State.applyEdits(
                 "Mid Co", v2State.getRoleTitle(), v2State.getLevel(), v2State.getLocation(), v2State.isRemote(),
                 v2State.getInterviewMonth(), v2State.getInterviewYear(), v2State.getOutcome(), "teaser v2",
-                v2State.getPrepAdvice(), v2State.getOverallDifficulty(), v2State.getTimeline(), v2State.getCompensation());
+                v2State.getPrepAdvice(), v2State.getOverallDifficulty(), v2State.getTimeline(), v2State.getCompensation(),
+                v2State.getConfidentialNote());
         ExperienceEditSnapshot snapshotB = new ExperienceEditSnapshot(UUID.randomUUID(), v2State);
 
         Experience v1State = draftOwnedByContributor();
         v1State.applyEdits(
                 "Old Co", v1State.getRoleTitle(), v1State.getLevel(), v1State.getLocation(), v1State.isRemote(),
                 v1State.getInterviewMonth(), v1State.getInterviewYear(), v1State.getOutcome(), "teaser v1",
-                v1State.getPrepAdvice(), v1State.getOverallDifficulty(), v1State.getTimeline(), v1State.getCompensation());
+                v1State.getPrepAdvice(), v1State.getOverallDifficulty(), v1State.getTimeline(), v1State.getCompensation(),
+                v1State.getConfidentialNote());
         ExperienceEditSnapshot snapshotA = new ExperienceEditSnapshot(UUID.randomUUID(), v1State);
 
         when(experienceRepository.findById(current.getId())).thenReturn(Optional.of(current));
@@ -377,6 +427,20 @@ class ExperienceServiceTest {
     void addRoundAllowsAPendingReviewExperience() {
         Experience experience = draftOwnedByContributor();
         experience.markPendingReview();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        when(roundRepository.countByExperienceId(experience.getId())).thenReturn(0L);
+
+        RoundRequest req = new RoundRequest("ONSITE", null, null, null, null, null, null);
+        ExperienceRoundResponse response = service.addRound(contributorId, experience.getId(), req);
+
+        assertThat(response.roundType()).isEqualTo("ONSITE");
+    }
+
+    @Test
+    void addRoundAllowsACorrectionRequestedExperience() {
+        Experience experience = draftOwnedByContributor();
+        experience.markPendingReview();
+        experience.requestCorrection("Please add more detail");
         when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
         when(roundRepository.countByExperienceId(experience.getId())).thenReturn(0L);
 
@@ -636,6 +700,21 @@ class ExperienceServiceTest {
                 .hasMessageContaining("round");
     }
 
+    @Test
+    void submitForReviewResubmitsACorrectionRequestedExperienceAndClearsTheCorrectionNotes() {
+        Experience experience = draftOwnedByContributor();
+        experience.markPendingReview();
+        experience.requestCorrection("Please add more detail to the teaser");
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        when(roundRepository.countByExperienceId(experience.getId())).thenReturn(1L);
+        when(proofDocumentRepository.countByExperienceId(experience.getId())).thenReturn(1L);
+
+        ExperienceFullResponse response = service.submitForReview(contributorId, experience.getId());
+
+        assertThat(response.status()).isEqualTo(ExperienceStatus.PENDING_REVIEW);
+        assertThat(response.correctionNotes()).isNull();
+    }
+
     // --- getPublicView ---
 
     @Test
@@ -693,6 +772,111 @@ class ExperienceServiceTest {
         ExperienceViewResponse response = service.getPublicView(viewerId, false, experience.getId());
 
         assertThat(response.entitled()).isTrue();
+    }
+
+    @Test
+    void getPublicViewIncludesConfidentialNoteForTheOwner() {
+        Experience experience = draftOwnedByContributor();
+        experience.applyEdits(
+                experience.getCompany(), experience.getRoleTitle(), experience.getLevel(), experience.getLocation(),
+                experience.isRemote(), experience.getInterviewMonth(), experience.getInterviewYear(),
+                experience.getOutcome(), experience.getTeaser(), experience.getPrepAdvice(),
+                experience.getOverallDifficulty(), experience.getTimeline(), experience.getCompensation(),
+                "Interviewer mentioned budget freeze — please verify before publishing");
+        experience.markPendingReview();
+        experience.publish();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        ExperienceViewResponse response = service.getPublicView(contributorId, false, experience.getId());
+
+        assertThat(response.full().confidentialNote())
+                .isEqualTo("Interviewer mentioned budget freeze — please verify before publishing");
+    }
+
+    @Test
+    void getPublicViewHidesConfidentialNoteFromAPurchaserWhoIsNeitherOwnerNorAdmin() {
+        Experience experience = draftOwnedByContributor();
+        experience.applyEdits(
+                experience.getCompany(), experience.getRoleTitle(), experience.getLevel(), experience.getLocation(),
+                experience.isRemote(), experience.getInterviewMonth(), experience.getInterviewYear(),
+                experience.getOutcome(), experience.getTeaser(), experience.getPrepAdvice(),
+                experience.getOverallDifficulty(), experience.getTimeline(), experience.getCompensation(),
+                "Interviewer mentioned budget freeze — please verify before publishing");
+        experience.markPendingReview();
+        experience.publish();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        UUID viewerId = UUID.randomUUID();
+        when(entitlementRepository.existsByUserIdAndExperienceId(viewerId, experience.getId())).thenReturn(true);
+
+        ExperienceViewResponse response = service.getPublicView(viewerId, false, experience.getId());
+
+        assertThat(response.entitled()).isTrue();
+        assertThat(response.full().confidentialNote()).isNull();
+    }
+
+    @Test
+    void getPublicViewIncrementsViewCountOnASignedInViewersFirstView() {
+        Experience experience = draftOwnedByContributor();
+        experience.markPendingReview();
+        experience.publish();
+        assertThat(experience.getViewCount()).isZero();
+        UUID viewerId = UUID.randomUUID();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        // Default stub (see setUp) returns 1 — a genuinely new (experience, viewer) pair.
+
+        service.getPublicView(viewerId, false, experience.getId());
+
+        assertThat(experience.getViewCount()).isEqualTo(1L);
+        verify(experienceRepository).save(experience);
+        verify(experienceViewRepository).recordView(any(), eq(experience.getId()), eq(viewerId));
+    }
+
+    /** The whole point of the one-per-user dedup — see ExperienceView's Javadoc. A second
+     * load by the same signed-in viewer (a repeat visit, or two near-simultaneous requests
+     * for the same viewer, e.g. React StrictMode's double-invoked effects) must not double
+     * the count. recordView returning 0 is exactly what a real
+     * INSERT ... ON CONFLICT DO NOTHING does for a duplicate (experience, viewer) pair. */
+    @Test
+    void getPublicViewDoesNotIncrementViewCountOnARepeatViewByTheSameSignedInViewer() {
+        Experience experience = draftOwnedByContributor();
+        experience.markPendingReview();
+        experience.publish();
+        UUID viewerId = UUID.randomUUID();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        when(experienceViewRepository.recordView(any(), eq(experience.getId()), eq(viewerId))).thenReturn(0);
+
+        service.getPublicView(viewerId, false, experience.getId());
+
+        assertThat(experience.getViewCount()).isZero();
+        verify(experienceRepository, never()).save(experience);
+    }
+
+    /** Guests have no reliable identity to dedupe against, so their views are never
+     * recorded or counted at all — not "counted every time" (the old behavior), just not
+     * counted, full stop. */
+    @Test
+    void getPublicViewDoesNotIncrementViewCountForAGuest() {
+        Experience experience = draftOwnedByContributor();
+        experience.markPendingReview();
+        experience.publish();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        service.getPublicView(null, false, experience.getId());
+
+        assertThat(experience.getViewCount()).isZero();
+        verify(experienceRepository, never()).save(experience);
+        verify(experienceViewRepository, never()).recordView(any(), any(), any());
+    }
+
+    @Test
+    void getPublicViewDoesNotIncrementViewCountForAnUnpublishedExperienceViewedByItsOwner() {
+        Experience experience = draftOwnedByContributor();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        service.getPublicView(contributorId, false, experience.getId());
+
+        assertThat(experience.getViewCount()).isZero();
+        verify(experienceViewRepository, never()).recordView(any(), any(), any());
     }
 
     @Test
@@ -1015,7 +1199,7 @@ class ExperienceServiceTest {
         Experience experience = rejectedOwnedByContributor();
         when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
 
-        ExperienceFullResponse response = service.updateDraft(contributorId, experience.getId(), sampleRequest());
+        ExperienceFullResponse response = service.updateDraft(contributorId, false, experience.getId(), sampleRequest());
 
         assertThat(response.company()).isEqualTo("Acme");
         verify(experienceRepository).save(experience);
@@ -1204,6 +1388,19 @@ class ExperienceServiceTest {
         // just delete a draft or a rejected one — same window as requireContentEditable.
         Experience experience = draftOwnedByContributor();
         experience.markPendingReview();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        when(proofDocumentRepository.findByExperienceId(experience.getId())).thenReturn(List.of());
+
+        service.deleteExperience(contributorId, experience.getId());
+
+        verify(experienceRepository).delete(experience);
+    }
+
+    @Test
+    void deleteExperienceWorksOnACorrectionRequestedExperienceToo() {
+        Experience experience = draftOwnedByContributor();
+        experience.markPendingReview();
+        experience.requestCorrection("Please add more detail");
         when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
         when(proofDocumentRepository.findByExperienceId(experience.getId())).thenReturn(List.of());
 

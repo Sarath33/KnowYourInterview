@@ -26,6 +26,11 @@ export function roundCountLabel(roundCount: number): string {
   return roundCount === 1 ? "1 round" : `${roundCount} rounds`;
 }
 
+/** "1 view" / "42 views" — raw hit counter, see ExperienceTeaser.viewCount. */
+export function viewCountLabel(viewCount: number): string {
+  return viewCount === 1 ? "1 view" : `${viewCount} views`;
+}
+
 /** Formats a paise amount as rupees, e.g. 19900 -> "₹199.00". */
 export function formatPaise(paise: number): string {
   return `₹${(paise / 100).toFixed(2)}`;

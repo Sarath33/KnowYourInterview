@@ -51,6 +51,7 @@ function makeExperience(overrides: Partial<ExperienceFull> = {}): ExperienceFull
     teaser: "Went well overall.",
     pricePaise: 9900,
     roundCount: 0,
+    viewCount: 0,
     unlocked: true,
     contributorId: "user-1",
     status: "DRAFT",

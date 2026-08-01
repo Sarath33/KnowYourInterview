@@ -57,7 +57,7 @@ public class ExperienceController {
             @AuthenticationPrincipal AuthenticatedUser user,
             @PathVariable UUID id,
             @Valid @RequestBody ExperienceRequest req) {
-        return experienceService.updateDraft(user.id(), id, req);
+        return experienceService.updateDraft(user.id(), user.admin(), id, req);
     }
 
     @PostMapping("/{id}/rounds")

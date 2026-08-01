@@ -1,13 +1,17 @@
 import { useState } from "react";
+import type { ExperienceRequest } from "../../../shared/types";
 import * as api from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 import { errorMessage } from "../lib/errors";
 import { CheckIcon, FileTextIcon, XIcon } from "./icons";
+import { EditDetailsForm } from "./SubmissionWorkspace";
 
 export function AdminReviewQueue() {
   const { data, loading, error: loadError, refetch } = useAsync(() => api.adminReviewQueue(), []);
   const [actionError, setActionError] = useState<string | null>(null);
   const [reasonDrafts, setReasonDrafts] = useState<Record<string, string>>({});
+  const [correctionDrafts, setCorrectionDrafts] = useState<Record<string, string>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const queue = data ?? [];
   const error = actionError ?? loadError;
@@ -35,6 +39,30 @@ export function AdminReviewQueue() {
     } catch (err) {
       setActionError(errorMessage(err));
     }
+  };
+
+  // The softer alternative to reject — see api.adminRequestCorrection. Typically used
+  // right after editing the submission in place below to fix what's wrong directly,
+  // and/or to leave notes on what the contributor still needs to change themselves.
+  const requestCorrection = async (id: string) => {
+    const notes = correctionDrafts[id]?.trim();
+    if (!notes) {
+      setActionError("Enter correction notes first");
+      return;
+    }
+    setActionError(null);
+    try {
+      await api.adminRequestCorrection(id, { notes });
+      await refetch();
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  };
+
+  const saveEdit = async (id: string, body: ExperienceRequest) => {
+    await api.updateExperience(id, body);
+    setEditingId(null);
+    await refetch();
   };
 
   const viewProof = async (experienceId: string, proofId: string) => {
@@ -65,8 +93,15 @@ export function AdminReviewQueue() {
         <div className="stack-md" style={{ gap: 20 }}>
           {queue.map((exp) => (
             <div key={exp.id} className="card card-pad-md">
-              <div style={{ fontFamily: "var(--font-heading)", fontWeight: 700, fontSize: 19 }}>
-                {exp.company} — {exp.roleTitle}
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div style={{ fontFamily: "var(--font-heading)", fontWeight: 700, fontSize: 19 }}>
+                  {exp.company} — {exp.roleTitle}
+                </div>
+                {editingId !== exp.id && (
+                  <button type="button" onClick={() => setEditingId(exp.id)} className="btn btn-outline">
+                    Edit submission
+                  </button>
+                )}
               </div>
               <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.5, margin: "10px 0" }}>
                 {exp.teaser}
@@ -83,6 +118,21 @@ export function AdminReviewQueue() {
                   — verify the source before approving.
                 </p>
               )}
+              {exp.confidentialNote && (
+                <p
+                  style={{
+                    background: "var(--warning-bg)",
+                    color: "var(--warning-text)",
+                    border: "1px solid var(--warning-border)",
+                    borderRadius: 8,
+                    padding: "10px 14px",
+                    fontSize: 13,
+                    margin: "0 0 10px",
+                  }}
+                >
+                  <strong>Confidential note from the submitter (visible to admins only):</strong> {exp.confidentialNote}
+                </p>
+              )}
               <p style={{ fontSize: 13, color: "var(--text-secondary-2)", fontWeight: 600 }}>
                 {exp.rounds.length} round(s), {exp.proofDocuments.length} proof document(s)
               </p>
@@ -97,7 +147,16 @@ export function AdminReviewQueue() {
                   </div>
                 ))}
               </div>
-              <div className="row">
+
+              {editingId === exp.id && (
+                <EditDetailsForm
+                  experience={exp}
+                  onSave={(body) => saveEdit(exp.id, body)}
+                  onCancel={() => setEditingId(null)}
+                />
+              )}
+
+              <div className="row" style={{ marginBottom: 12 }}>
                 <button type="button" onClick={() => approve(exp.id)} className="btn btn-primary">
                   Approve &amp; publish
                   <CheckIcon />
@@ -112,6 +171,18 @@ export function AdminReviewQueue() {
                 <button type="button" onClick={() => reject(exp.id)} className="btn btn-outline btn-outline-danger">
                   Reject
                   <XIcon />
+                </button>
+              </div>
+              <div className="row">
+                <input
+                  placeholder="Correction notes for the contributor"
+                  value={correctionDrafts[exp.id] ?? ""}
+                  onChange={(e) => setCorrectionDrafts({ ...correctionDrafts, [exp.id]: e.target.value })}
+                  className="text-input"
+                  style={{ width: 320 }}
+                />
+                <button type="button" onClick={() => requestCorrection(exp.id)} className="btn btn-outline">
+                  Request correction
                 </button>
               </div>
             </div>

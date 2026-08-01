@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../lib/useAsync";
 import { OutcomeTag, RemoteTag, UnlockedTag } from "./tags";
 import { ArrowRightIcon } from "./icons";
-import { formatPaise, interviewedLabel, levelLine, publishedLabel, roundCountLabel } from "../lib/format";
+import { formatPaise, interviewedLabel, levelLine, publishedLabel, roundCountLabel, viewCountLabel } from "../lib/format";
 
 const PAGE_SIZE = 20;
 
@@ -225,13 +225,9 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
                     <span className="tag tag-neutral">{roundCountLabel(exp.roundCount)}</span>
                     {exp.unlocked && !exp.isFree && <UnlockedTag />}
                   </div>
-                  {(recency || posted) && (
-                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                      {recency}
-                      {recency && posted && " · "}
-                      {posted}
-                    </div>
-                  )}
+                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    {[recency, posted, viewCountLabel(exp.viewCount)].filter(Boolean).join(" · ")}
+                  </div>
                   <div className="browse-card-footer">
                     <span className="price-tag">{exp.isFree ? "Free" : formatPaise(exp.pricePaise)}</span>
                     <button type="button" onClick={() => onSelect(exp.id)} className="btn btn-outline btn-outline-accent">

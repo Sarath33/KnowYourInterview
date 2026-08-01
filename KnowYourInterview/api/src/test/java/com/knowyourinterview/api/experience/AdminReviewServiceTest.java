@@ -72,7 +72,7 @@ class AdminReviewServiceTest {
         Experience experience = new Experience(
                 UUID.randomUUID(), UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Bengaluru",
                 true, (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser", "advice",
-                (short) 3, "3 weeks", "35 LPA", 19900);
+                (short) 3, "3 weeks", "35 LPA", null, 19900);
         experience.markPendingReview();
         return experience;
     }
@@ -133,7 +133,7 @@ class AdminReviewServiceTest {
         Experience draft = new Experience(
                 UUID.randomUUID(), UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Bengaluru",
                 true, (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser", "advice",
-                (short) 3, "3 weeks", "35 LPA", 19900);
+                (short) 3, "3 weeks", "35 LPA", null, 19900);
         when(experienceRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
 
         assertThatThrownBy(() -> service.approve(UUID.randomUUID(), draft.getId()))
@@ -189,6 +189,33 @@ class AdminReviewServiceTest {
         when(experienceRepository.findById(published.getId())).thenReturn(Optional.of(published));
 
         assertThatThrownBy(() -> service.reject(UUID.randomUUID(), published.getId(), "reason"))
+                .isInstanceOf(InvalidStateException.class);
+    }
+
+    @Test
+    void requestCorrectionRecordsNotesAndTransitionsToCorrectionRequested() {
+        Experience experience = pendingReviewExperience();
+        UUID adminId = UUID.randomUUID();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        ExperienceFullResponse response = service.requestCorrection(adminId, experience.getId(), "Fix the teaser wording");
+
+        assertThat(response.status()).isEqualTo(ExperienceStatus.CORRECTION_REQUESTED);
+        assertThat(response.correctionNotes()).isEqualTo("Fix the teaser wording");
+        verify(payoutRepository, never()).save(any());
+
+        ArgumentCaptor<ReviewLog> logCaptor = ArgumentCaptor.forClass(ReviewLog.class);
+        verify(reviewLogRepository).save(logCaptor.capture());
+        assertThat(logCaptor.getValue().getAction()).isEqualTo(ReviewLog.Action.CORRECTION_REQUESTED);
+    }
+
+    @Test
+    void requestCorrectionRejectsExperienceThatIsNotPendingReview() {
+        Experience published = pendingReviewExperience();
+        published.publish();
+        when(experienceRepository.findById(published.getId())).thenReturn(Optional.of(published));
+
+        assertThatThrownBy(() -> service.requestCorrection(UUID.randomUUID(), published.getId(), "notes"))
                 .isInstanceOf(InvalidStateException.class);
     }
 

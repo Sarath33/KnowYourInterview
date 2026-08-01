@@ -31,12 +31,17 @@ public record ExperienceTeaserResponse(
         // is true.
         boolean isFree,
         String sourceUrl,
-        String sourceName) {
+        String sourceName,
+        // Raw hit counter — how many times this experience's detail page has been
+        // loaded while PUBLISHED. Public, shown on both the Browse card and the detail
+        // page. See Experience#incrementViewCount.
+        long viewCount) {
 
     public static ExperienceTeaserResponse from(Experience e, long roundCount, boolean unlocked) {
         return new ExperienceTeaserResponse(
                 e.getId(), e.getCompany(), e.getRoleTitle(), e.getLevel(), e.getLocation(), e.isRemote(),
                 e.getInterviewMonth(), e.getInterviewYear(), e.getOutcome(), e.getTeaser(), e.getPricePaise(),
-                (int) roundCount, e.getPublishedAt(), unlocked, e.isFree(), e.getSourceUrl(), e.getSourceName());
+                (int) roundCount, e.getPublishedAt(), unlocked, e.isFree(), e.getSourceUrl(), e.getSourceName(),
+                e.getViewCount());
     }
 }

@@ -87,7 +87,7 @@ class PurchaseFlowIT {
                 "/api/v1/experiences", contributor.accessToken(),
                 """
                 {"company":"Acme","roleTitle":"Backend Engineer","isRemote":true,
-                 "outcome":"OFFER","teaser":"Solid onsite loop, focus on systems design."}
+                 "outcome":"OFFER","teaser":"Solid onsite loop, focus on systems design.","freeContribution":false}
                 """,
                 ExperienceFullResponse.class).getBody();
         assertThat(draft).isNotNull();
@@ -209,10 +209,14 @@ class PurchaseFlowIT {
 
     private void uploadProof(UUID experienceId, String accessToken) {
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        // Filename extension drives the part's inferred Content-Type here, which must be
+        // in ExperienceService's proof content-type allow-list (application/pdf et al.) —
+        // "not a real PDF" bytes are fine since the server does a defense-in-depth
+        // allow-list check on content type, not real file-content sniffing.
         body.add("file", new ByteArrayResource("not a real PDF, just IT test bytes".getBytes()) {
             @Override
             public String getFilename() {
-                return "proof.txt";
+                return "proof.pdf";
             }
         });
         HttpHeaders headers = new HttpHeaders();

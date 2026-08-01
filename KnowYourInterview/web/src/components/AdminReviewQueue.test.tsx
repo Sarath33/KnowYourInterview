@@ -26,6 +26,7 @@ function pendingExperience(overrides: Partial<ExperienceFull> = {}): ExperienceF
     teaser: "Went well overall.",
     pricePaise: 19900,
     roundCount: 1,
+    viewCount: 0,
     unlockCount: 0,
     unlocked: true,
     status: "PENDING_REVIEW",

@@ -46,8 +46,8 @@ class AdminReviewControllerTest {
         return new ExperienceFullResponse(
                 UUID.randomUUID(), UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Remote", true,
                 (short) 6, (short) 2026, ExperienceOutcome.OFFER, "Solid loop.", 9900, 0, null,
-                ExperienceStatus.PENDING_REVIEW, null, null, null, null, null, 0, List.of(), List.of(), true,
-                false, null, null);
+                ExperienceStatus.PENDING_REVIEW, null, null, null, null, null, null, 0, List.of(), List.of(), true,
+                false, null, null, 0L, null);
     }
 
     @Test
@@ -76,5 +76,29 @@ class AdminReviewControllerTest {
         mockMvc.perform(post("/api/v1/admin/experiences/" + UUID.randomUUID() + "/approve")
                         .header("Authorization", tokenFor(true)))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void requestCorrectionAllowsAdmin() throws Exception {
+        when(adminReviewService.requestCorrection(any(), any(), any())).thenReturn(sample());
+
+        mockMvc.perform(post("/api/v1/admin/experiences/" + UUID.randomUUID() + "/request-correction")
+                        .header("Authorization", tokenFor(true))
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"notes":"Fix the teaser wording"}
+                                """))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void requestCorrectionRejectsNonAdmin() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/experiences/" + UUID.randomUUID() + "/request-correction")
+                        .header("Authorization", tokenFor(false))
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"notes":"Fix the teaser wording"}
+                                """))
+                .andExpect(status().isForbidden());
     }
 }

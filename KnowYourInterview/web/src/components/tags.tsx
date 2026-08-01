@@ -21,13 +21,14 @@ const STATUS_LABEL: Record<ExperienceStatus, string> = {
   PENDING_REVIEW: "Pending review",
   APPROVED: "Approved",
   REJECTED: "Rejected",
+  CORRECTION_REQUESTED: "Correction requested",
   PUBLISHED: "Published",
 };
 
 export function StatusTag({ status, small = false }: { status: ExperienceStatus; small?: boolean }) {
   const cls = small ? "tag tag-sm" : "tag";
   if (status === "PUBLISHED" || status === "APPROVED") return <span className={`${cls} tag-success`}>{STATUS_LABEL[status]}</span>;
-  if (status === "PENDING_REVIEW") return <span className={`${cls} tag-warning`}>{STATUS_LABEL[status]}</span>;
+  if (status === "PENDING_REVIEW" || status === "CORRECTION_REQUESTED") return <span className={`${cls} tag-warning`}>{STATUS_LABEL[status]}</span>;
   if (status === "REJECTED") return <span className={`${cls} tag-danger`}>{STATUS_LABEL[status]}</span>;
   return <span className={`${cls} tag-neutral`}>{STATUS_LABEL[status]}</span>;
 }

@@ -81,9 +81,13 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body(HttpStatus.BAD_REQUEST, ex.getMessage(), null));
     }
 
-    /** Malformed / unparseable request body (bad JSON, wrong type at the root, empty body). */
+    /** Malformed / unparseable request body (bad JSON, wrong type at the root, empty body).
+     * Logged at warn level (unlike most 4xx handlers here) because the generic client-facing
+     * message on its own gives no clue which field/type actually failed to bind — the
+     * underlying Jackson cause (getMostSpecificCause) has that detail. */
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, Object>> handleUnreadableBody(HttpMessageNotReadableException ex) {
+        log.warn("Malformed request body: {}", ex.getMostSpecificCause().getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(body(HttpStatus.BAD_REQUEST, "Malformed request body", null));
     }

@@ -7,7 +7,7 @@ import { useAsync } from "../lib/useAsync";
 import { errorMessage } from "../lib/errors";
 import { OutcomeTag, RemoteTag } from "./tags";
 import { ArrowLeftIcon, LockIcon } from "./icons";
-import { formatPaise, interviewedLabel, levelLine, roundCountLabel } from "../lib/format";
+import { formatPaise, interviewedLabel, levelLine, roundCountLabel, viewCountLabel } from "../lib/format";
 
 export function ExperienceDetail({
   experienceId,
@@ -145,9 +145,9 @@ function TeaserWithUnlock({
         {teaser.isRemote && <RemoteTag />}
         <span className="tag tag-neutral">{roundCountLabel(teaser.roundCount)}</span>
       </div>
-      {recency && (
-        <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8 }}>{recency}</div>
-      )}
+      <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8 }}>
+        {[recency, viewCountLabel(teaser.viewCount)].filter(Boolean).join(" · ")}
+      </div>
       <p style={{ color: "var(--text-secondary)", fontSize: 15, lineHeight: 1.6 }}>{teaser.teaser}</p>
       <div className="divider" />
       <p style={{ fontSize: 15, color: "var(--text-secondary-2)", lineHeight: 1.6 }}>
@@ -206,25 +206,27 @@ function FullExperience({
         <OutcomeTag outcome={full.outcome} />
         {full.isRemote && <RemoteTag />}
       </div>
-      {(recency || full.publishedAt || full.isFree) && (
-        <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 24 }}>
-          {recency}
-          {recency && (full.publishedAt || full.isFree) && " · "}
-          {full.isFree
+      <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 24 }}>
+        {[
+          recency,
+          full.isFree
             ? "Free"
             : full.publishedAt &&
-              `Unlocked by ${full.unlockCount} ${full.unlockCount === 1 ? "person" : "people"}`}
-          {full.isFree && full.sourceUrl && (
-            <>
-              {" · "}
-              Summarized from{" "}
-              <a href={full.sourceUrl} target="_blank" rel="noopener noreferrer">
-                {full.sourceName || "the original source"}
-              </a>
-            </>
-          )}
-        </div>
-      )}
+              `Unlocked by ${full.unlockCount} ${full.unlockCount === 1 ? "person" : "people"}`,
+          viewCountLabel(full.viewCount),
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+        {full.isFree && full.sourceUrl && (
+          <>
+            {" · "}
+            Summarized from{" "}
+            <a href={full.sourceUrl} target="_blank" rel="noopener noreferrer">
+              {full.sourceName || "the original source"}
+            </a>
+          </>
+        )}
+      </div>
 
       {canUnpublish && !isSelfFreeContribution && (
         <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 20 }}>

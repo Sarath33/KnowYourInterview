@@ -32,6 +32,10 @@ public record ExperienceFullResponse(
         String timeline,
         String compensation,
         String rejectionReason,
+        // Set alongside status == CORRECTION_REQUESTED — see Experience#requestCorrection.
+        // Same shape/lifecycle as rejectionReason above, just for the softer "please fix
+        // and resubmit" verdict instead of an outright rejection.
+        String correctionNotes,
         // How many people hold a real (paid) Entitlement for this experience — visible to
         // whoever gets full access (owner, admin, or a purchaser), same audience as
         // everything else on this DTO. Not shown on the public teaser.
@@ -48,15 +52,29 @@ public record ExperienceFullResponse(
         // Javadoc on those fields.
         boolean isFree,
         String sourceUrl,
-        String sourceName) {
+        String sourceName,
+        // Mirrors ExperienceTeaserResponse#viewCount — see Experience's Javadoc on the field.
+        long viewCount,
+        // Submitter-authored, admin-only-visible — see Experience's Javadoc on
+        // confidentialNote. Null here whenever the caller isn't the owner or an admin;
+        // see ExperienceResponseAssembler#toFullResponse's includeConfidentialNote param.
+        String confidentialNote) {
 
+    /** Owner/admin-facing overload — always includes confidentialNote. */
     public static ExperienceFullResponse from(
             Experience e, List<ExperienceRoundResponse> rounds, List<ProofDocumentResponse> proof, long unlockCount) {
+        return from(e, rounds, proof, unlockCount, true);
+    }
+
+    public static ExperienceFullResponse from(
+            Experience e, List<ExperienceRoundResponse> rounds, List<ProofDocumentResponse> proof, long unlockCount,
+            boolean includeConfidentialNote) {
         return new ExperienceFullResponse(
                 e.getId(), e.getContributorId(), e.getCompany(), e.getRoleTitle(), e.getLevel(), e.getLocation(),
                 e.isRemote(), e.getInterviewMonth(), e.getInterviewYear(), e.getOutcome(), e.getTeaser(),
                 e.getPricePaise(), rounds.size(), e.getPublishedAt(), e.getStatus(), e.getPrepAdvice(),
-                e.getOverallDifficulty(), e.getTimeline(), e.getCompensation(), e.getRejectionReason(), unlockCount,
-                rounds, proof, true, e.isFree(), e.getSourceUrl(), e.getSourceName());
+                e.getOverallDifficulty(), e.getTimeline(), e.getCompensation(), e.getRejectionReason(),
+                e.getCorrectionNotes(), unlockCount, rounds, proof, true, e.isFree(), e.getSourceUrl(),
+                e.getSourceName(), e.getViewCount(), includeConfidentialNote ? e.getConfidentialNote() : null);
     }
 }

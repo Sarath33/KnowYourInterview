@@ -40,6 +40,7 @@ const teaser: ExperienceTeaser = {
   pricePaise: 19900,
   roundCount: 1,
   unlocked: false,
+  viewCount: 0,
 };
 
 const fullExperience: ExperienceFull = {

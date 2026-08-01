@@ -8,6 +8,7 @@ import type {
   ExperienceRequest,
   RoundRequest,
   RejectRequest,
+  CorrectionRequest,
   ExperienceFull,
   ExperienceRound,
   ExperienceEditSnapshot,
@@ -348,6 +349,16 @@ export async function adminApprove(id: string): Promise<ExperienceFull> {
 
 export async function adminReject(id: string, body: RejectRequest): Promise<ExperienceFull> {
   return request(`/api/v1/admin/experiences/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** The softer alternative to reject — see CorrectionRequest and ExperienceStatus's
+ * "CORRECTION_REQUESTED" value. Typically called right after an admin edit
+ * (updateExperience) fixing the submission directly. */
+export async function adminRequestCorrection(id: string, body: CorrectionRequest): Promise<ExperienceFull> {
+  return request(`/api/v1/admin/experiences/${id}/request-correction`, {
     method: "POST",
     body: JSON.stringify(body),
   });

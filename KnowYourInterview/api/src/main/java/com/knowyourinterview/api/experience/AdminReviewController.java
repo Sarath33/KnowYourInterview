@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.knowyourinterview.api.experience.dto.CorrectionRequest;
 import com.knowyourinterview.api.experience.dto.ExperienceFullResponse;
 import com.knowyourinterview.api.experience.dto.RejectRequest;
 import com.knowyourinterview.api.security.AuthenticatedUser;
@@ -49,5 +50,13 @@ public class AdminReviewController {
             @PathVariable UUID id,
             @Valid @RequestBody RejectRequest req) {
         return adminReviewService.reject(admin.id(), id, req.reason());
+    }
+
+    @PostMapping("/{id}/request-correction")
+    public ExperienceFullResponse requestCorrection(
+            @AuthenticationPrincipal AuthenticatedUser admin,
+            @PathVariable UUID id,
+            @Valid @RequestBody CorrectionRequest req) {
+        return adminReviewService.requestCorrection(admin.id(), id, req.notes());
     }
 }

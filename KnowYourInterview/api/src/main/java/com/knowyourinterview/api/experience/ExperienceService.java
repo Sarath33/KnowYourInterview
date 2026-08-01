@@ -47,6 +47,7 @@ public class ExperienceService {
     private final PayoutRepository payoutRepository;
     private final ExperienceResponseAssembler responseAssembler;
     private final ExperienceEditSnapshotRepository editSnapshotRepository;
+    private final ExperienceViewRepository experienceViewRepository;
     private final int defaultPricePaise;
     private final int maxPageSize;
 
@@ -67,6 +68,7 @@ public class ExperienceService {
             PayoutRepository payoutRepository,
             ExperienceResponseAssembler responseAssembler,
             ExperienceEditSnapshotRepository editSnapshotRepository,
+            ExperienceViewRepository experienceViewRepository,
             @Value("${app.pricing.default-price-paise}") int defaultPricePaise,
             @Value("${app.pagination.max-page-size:100}") int maxPageSize) {
         this.experienceRepository = experienceRepository;
@@ -78,6 +80,7 @@ public class ExperienceService {
         this.payoutRepository = payoutRepository;
         this.responseAssembler = responseAssembler;
         this.editSnapshotRepository = editSnapshotRepository;
+        this.experienceViewRepository = experienceViewRepository;
         this.defaultPricePaise = defaultPricePaise;
         this.maxPageSize = maxPageSize;
     }
@@ -117,6 +120,7 @@ public class ExperienceService {
                 UUID.randomUUID(), contributorId, req.company(), req.roleTitle(), req.level(), req.location(),
                 req.isRemote(), req.interviewMonth(), req.interviewYear(), req.outcome(), req.teaser(),
                 req.prepAdvice(), req.overallDifficulty(), req.timeline(), req.compensation(),
+                blankToNull(req.confidentialNote()),
                 (isReference || isFreeContribution) ? 0 : defaultPricePaise);
         if (isReference) {
             experience.markAsReference(sourceUrl, sourceName);
@@ -131,10 +135,17 @@ public class ExperienceService {
      * until now — but only if something in `req` actually differs from the current
      * values. A contributor re-saving the form unchanged (e.g. just to check something)
      * shouldn't pad the edit history with a no-op entry. See listEditHistory(), which
-     * turns the resulting sequence of snapshots into a diffed history view. */
+     * turns the resulting sequence of snapshots into a diffed history view.
+     * <p>
+     * Owner or admin — an admin editing directly is part of the correction-requested
+     * flow (see AdminReviewService#requestCorrection): the edit applies immediately and
+     * shows up in the same edit-history log a contributor's own edit would, there's no
+     * separate "admin edit" staging step. confidentialNote is applied like any other
+     * field here but deliberately isn't part of the edit-history diff — see FieldValues. */
     @Transactional
-    public ExperienceFullResponse updateDraft(UUID contributorId, UUID experienceId, ExperienceRequest req) {
-        Experience experience = getOwned(contributorId, experienceId);
+    public ExperienceFullResponse updateDraft(
+            UUID actorId, boolean actorIsAdmin, UUID experienceId, ExperienceRequest req) {
+        Experience experience = getOwnedOrAdmin(actorId, actorIsAdmin, experienceId);
         requireContentEditable(experience, "A published experience can't be edited directly — unpublish it first");
         if (!diffFields(FieldValues.of(experience), FieldValues.of(req)).isEmpty()) {
             editSnapshotRepository.save(new ExperienceEditSnapshot(UUID.randomUUID(), experience));
@@ -142,7 +153,7 @@ public class ExperienceService {
         experience.applyEdits(
                 req.company(), req.roleTitle(), req.level(), req.location(), req.isRemote(), req.interviewMonth(),
                 req.interviewYear(), req.outcome(), req.teaser(), req.prepAdvice(), req.overallDifficulty(),
-                req.timeline(), req.compensation());
+                req.timeline(), req.compensation(), blankToNull(req.confidentialNote()));
         experienceRepository.save(experience);
         return responseAssembler.toFullResponse(experience);
     }
@@ -329,7 +340,8 @@ public class ExperienceService {
     @Transactional
     public ExperienceFullResponse submitForReview(UUID contributorId, UUID experienceId) {
         Experience experience = getOwned(contributorId, experienceId);
-        requireDraftOrRejected(experience, "Only a draft or rejected experience can be submitted for review");
+        requireResubmittable(experience,
+                "Only a draft, rejected, or correction-requested experience can be submitted for review");
 
         if (roundRepository.countByExperienceId(experienceId) == 0) {
             throw new InvalidStateException("Add at least one interview round before submitting");
@@ -400,8 +412,17 @@ public class ExperienceService {
      * moment an experience got unpublished for an edit. Entitlement now grants visibility
      * in its own right, independent of current status, so already-paid access survives an
      * unpublish/re-review cycle.
+     * <p>
+     * Also the sole place view_count gets incremented — a signed-in viewer's first ever
+     * load of a PUBLISHED experience's detail page counts as a view; loading it again
+     * later doesn't (see ExperienceView / ExperienceViewRepository#recordView, which is
+     * what makes this one-per-user instead of once-per-page-load). Counts regardless of
+     * whether they get the full write-up or just the teaser, and regardless of whether
+     * they're the owner, an admin, or a purchaser — but only if they're signed in; a
+     * guest's view is never recorded or counted, since there's no reliable identity to
+     * dedupe a guest against. Not readOnly any more because of that write.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public ExperienceViewResponse getPublicView(UUID viewerId, boolean viewerIsAdmin, UUID experienceId) {
         Experience experience = experienceRepository.findById(experienceId)
                 .orElseThrow(() -> new NotFoundException("Experience not found"));
@@ -420,8 +441,22 @@ public class ExperienceService {
             throw new NotFoundException("Experience not found");
         }
 
+        if (experience.getStatus() == ExperienceStatus.PUBLISHED && viewerId != null) {
+            boolean isFirstViewByThisViewer =
+                    experienceViewRepository.recordView(UUID.randomUUID(), experienceId, viewerId) > 0;
+            if (isFirstViewByThisViewer) {
+                experience.incrementViewCount();
+                experienceRepository.save(experience);
+            }
+        }
+
         if (isOwner || viewerIsAdmin || hasPurchased || freeAndPublished) {
-            return ExperienceViewResponse.fullAccess(responseAssembler.toFullResponse(experience));
+            // confidentialNote is for the submitter and admins only — a purchaser or a
+            // free-viewer who's neither still reaches this fullAccess branch (they're
+            // entitled to the content), but shouldn't see it.
+            boolean includeConfidentialNote = isOwner || viewerIsAdmin;
+            return ExperienceViewResponse.fullAccess(
+                    responseAssembler.toFullResponse(experience, includeConfidentialNote));
         }
         // Reaching this branch means hasPurchased was false (otherwise we'd be in the
         // fullAccess branch above), so unlocked is always false here.
@@ -453,28 +488,47 @@ public class ExperienceService {
         return experience;
     }
 
+    /** Same lookup as getOwned, but also lets an admin through regardless of ownership —
+     * used only by updateDraft, so an admin can edit a contributor's submission directly
+     * as part of the correction-requested flow. */
+    private Experience getOwnedOrAdmin(UUID actorId, boolean actorIsAdmin, UUID experienceId) {
+        Experience experience = experienceRepository.findById(experienceId)
+                .orElseThrow(() -> new NotFoundException("Experience not found"));
+        boolean isOwner = actorId != null && actorId.equals(experience.getContributorId());
+        if (!isOwner && !actorIsAdmin) {
+            throw new ForbiddenException("You don't have permission to edit this experience");
+        }
+        return experience;
+    }
+
     /** Content (fields, rounds, proof documents) can be edited any time before an
      * experience is either live or fully withdrawn: DRAFT (never submitted), PENDING_REVIEW
      * (submitted, awaiting a verdict — a contributor spotting a typo or wanting to add
-     * detail shouldn't have to wait for a rejection first), or REJECTED (sent back with a
-     * reason). Only PUBLISHED is locked out — a live listing has to go through
-     * unpublish() first, which is a bigger, more deliberate action than a content edit. */
+     * detail shouldn't have to wait for a rejection first), REJECTED, or
+     * CORRECTION_REQUESTED (sent back with a reason/notes to fix). Only PUBLISHED is
+     * locked out — a live listing has to go through unpublish() first, which is a
+     * bigger, more deliberate action than a content edit. */
     private void requireContentEditable(Experience experience, String message) {
         ExperienceStatus status = experience.getStatus();
         boolean editable = status == ExperienceStatus.DRAFT
                 || status == ExperienceStatus.PENDING_REVIEW
-                || status == ExperienceStatus.REJECTED;
+                || status == ExperienceStatus.REJECTED
+                || status == ExperienceStatus.CORRECTION_REQUESTED;
         if (!editable) {
             throw new InvalidStateException(message);
         }
     }
 
-    /** Narrower than requireContentEditable — DRAFT or REJECTED only. Used by
-     * submitForReview: there's nothing to (re)submit while already PENDING_REVIEW, so
-     * that one action stays out of scope even though deleteExperience no longer does. */
-    private void requireDraftOrRejected(Experience experience, String message) {
+    /** Narrower than requireContentEditable — DRAFT, REJECTED, or CORRECTION_REQUESTED
+     * only. Used by submitForReview: there's nothing to (re)submit while already
+     * PENDING_REVIEW, so that one status stays out of scope even though deleteExperience
+     * no longer does. */
+    private void requireResubmittable(Experience experience, String message) {
         ExperienceStatus status = experience.getStatus();
-        if (status != ExperienceStatus.DRAFT && status != ExperienceStatus.REJECTED) {
+        boolean resubmittable = status == ExperienceStatus.DRAFT
+                || status == ExperienceStatus.REJECTED
+                || status == ExperienceStatus.CORRECTION_REQUESTED;
+        if (!resubmittable) {
             throw new InvalidStateException(message);
         }
     }

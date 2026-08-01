@@ -349,6 +349,7 @@ interface DetailsFormState {
   overallDifficulty: string;
   timeline: string;
   compensation: string;
+  confidentialNote: string;
 }
 
 function toDetailsForm(exp: ExperienceFull): DetailsFormState {
@@ -366,6 +367,7 @@ function toDetailsForm(exp: ExperienceFull): DetailsFormState {
     overallDifficulty: exp.overallDifficulty ? String(exp.overallDifficulty) : "",
     timeline: exp.timeline ?? "",
     compensation: exp.compensation ?? "",
+    confidentialNote: exp.confidentialNote ?? "",
   };
 }
 
@@ -375,7 +377,11 @@ function toExperienceRequest(f: DetailsFormState): ExperienceRequest {
     roleTitle: f.roleTitle,
     level: f.level || undefined,
     location: f.location || undefined,
-    isRemote: f.isRemote,
+    // Coerced rather than passed through as-is — the backend's isRemote is a primitive
+    // boolean, and an explicit `null` here (e.g. from a stale/malformed restored
+    // autosave draft) fails Jackson deserialization outright rather than surfacing as a
+    // normal validation error. Boolean(null/undefined) safely becomes false.
+    isRemote: Boolean(f.isRemote),
     interviewMonth: f.interviewMonth ? Number(f.interviewMonth) : undefined,
     interviewYear: f.interviewYear ? Number(f.interviewYear) : undefined,
     outcome: f.outcome,
@@ -384,6 +390,7 @@ function toExperienceRequest(f: DetailsFormState): ExperienceRequest {
     overallDifficulty: f.overallDifficulty ? Number(f.overallDifficulty) : undefined,
     timeline: f.timeline || undefined,
     compensation: f.compensation || undefined,
+    confidentialNote: f.confidentialNote || undefined,
   };
 }
 
@@ -392,7 +399,7 @@ function toExperienceRequest(f: DetailsFormState): ExperienceRequest {
  * advice, overall difficulty, timeline, compensation. Wired to the same
  * api.updateExperience/ExperienceService#updateDraft the create flow already used —
  * this was previously a backend-only capability with no way to reach it from the UI. */
-function EditDetailsForm({
+export function EditDetailsForm({
   experience,
   onSave,
   onCancel,
@@ -533,6 +540,7 @@ function EditDetailsForm({
             id="ed-year"
             type="number"
             min={2000}
+            max={2100}
             className="text-input"
             value={form.interviewYear}
             onChange={(e) => setForm({ ...form, interviewYear: e.target.value })}
@@ -620,6 +628,19 @@ function EditDetailsForm({
             onChange={(e) => setForm({ ...form, compensation: e.target.value })}
           />
         </div>
+      </div>
+      <div className="field">
+        <label className="field-label" htmlFor="ed-confidential">
+          Confidential note to the reviewer (not shown publicly)
+        </label>
+        <textarea
+          id="ed-confidential"
+          rows={2}
+          className="textarea"
+          placeholder="Anything you want the admin to know that shouldn't appear in the public write-up"
+          value={form.confidentialNote}
+          onChange={(e) => setForm({ ...form, confidentialNote: e.target.value })}
+        />
       </div>
       {error && <p className="error-text">{error}</p>}
       <div className="row">
@@ -781,10 +802,21 @@ export function SubmissionWorkspace() {
       return;
     }
     // Not a reference submission — never send stale sourceUrl/sourceName from a toggle
-    // that got flipped back after they were filled in.
+    // that got flipped back after they were filled in. isRemote/freeContribution are
+    // coerced with Boolean(...) rather than passed through as-is — both are primitive
+    // booleans on the backend, and an explicit `null` (e.g. surviving a restored
+    // autosave draft saved by an older, incompatible version of this form) fails
+    // Jackson deserialization outright instead of surfacing as a normal validation
+    // error. Boolean(null/undefined) safely becomes false.
     const body: ExperienceRequest = isReference
-      ? { ...form, freeContribution: false }
-      : { ...form, sourceUrl: undefined, sourceName: undefined, freeContribution };
+      ? { ...form, isRemote: Boolean(form.isRemote), freeContribution: false }
+      : {
+          ...form,
+          isRemote: Boolean(form.isRemote),
+          sourceUrl: undefined,
+          sourceName: undefined,
+          freeContribution: Boolean(freeContribution),
+        };
     try {
       const created = await api.createExperience(body);
       // The draft exists now — add any rounds queued up before creation. If one fails,
@@ -1058,6 +1090,19 @@ export function SubmissionWorkspace() {
                       required
                     />
                   </div>
+                  <div className="field">
+                    <label className="field-label" htmlFor="nd-confidential">
+                      Confidential note to the reviewer (not shown publicly)
+                    </label>
+                    <textarea
+                      id="nd-confidential"
+                      rows={2}
+                      className="textarea"
+                      placeholder="Anything you want the admin to know that shouldn't appear in the public write-up"
+                      value={form.confidentialNote ?? ""}
+                      onChange={(e) => setForm({ ...form, confidentialNote: e.target.value })}
+                    />
+                  </div>
                   <div className="divider" />
                   <div className="section-title" style={{ fontSize: 16 }}>
                     Rounds ({pendingRounds.length})
@@ -1149,17 +1194,22 @@ function SubmissionDetail({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   // Content (rounds, proof docs) can be edited any time before an experience is live or
-  // fully withdrawn: draft, pending review, or rejected. Matches
+  // fully withdrawn: draft, pending review, rejected, or correction-requested. Matches
   // ExperienceService#requireContentEditable.
   const isContentEditable =
     experience.status === "DRAFT" ||
     experience.status === "PENDING_REVIEW" ||
-    experience.status === "REJECTED";
-  // Submitting is narrower — draft or rejected only, since there's nothing to (re)submit
-  // while already pending review. Matches ExperienceService#requireDraftOrRejected.
-  // Deleting isn't narrower any more — it shares isContentEditable's window below, so a
-  // contributor can withdraw a submission before an admin has acted on it too.
-  const isDraftOrRejected = experience.status === "DRAFT" || experience.status === "REJECTED";
+    experience.status === "REJECTED" ||
+    experience.status === "CORRECTION_REQUESTED";
+  // Submitting is narrower — draft, rejected, or correction-requested, since there's
+  // nothing to (re)submit while already pending review. Matches
+  // ExperienceService#requireResubmittable. Deleting isn't narrower any more — it shares
+  // isContentEditable's window below, so a contributor can withdraw a submission before
+  // an admin has acted on it too.
+  const isResubmittable =
+    experience.status === "DRAFT" ||
+    experience.status === "REJECTED" ||
+    experience.status === "CORRECTION_REQUESTED";
   // A free experience with no sourceUrl is the contributor's own free contribution — it
   // skips admin review entirely (see backend ExperienceService#submitForReview). A free
   // experience WITH a sourceUrl is an admin "reference a public source" submission, which
@@ -1392,6 +1442,22 @@ function SubmissionDetail({
           it below, or delete it.
         </p>
       )}
+      {experience.status === "CORRECTION_REQUESTED" && experience.correctionNotes && (
+        <p
+          style={{
+            background: "var(--warning-bg)",
+            color: "var(--warning-text)",
+            border: "1px solid var(--warning-border)",
+            borderRadius: 8,
+            padding: "10px 14px",
+            fontSize: 14,
+          }}
+        >
+          <strong>Correction requested:</strong> {experience.correctionNotes} An admin may
+          have also edited the details directly — review them below, make any further
+          changes needed, and resubmit.
+        </p>
+      )}
       {experience.status === "PENDING_REVIEW" && (
         <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
           Awaiting admin review. You can still add or remove rounds, upload or delete
@@ -1484,12 +1550,12 @@ function SubmissionDetail({
         <>
           <div className="divider" />
           <div className="row" style={{ justifyContent: "space-between" }}>
-            {isDraftOrRejected ? (
+            {isResubmittable ? (
               <div className="row">
                 <button type="button" onClick={handleSubmit} className="btn btn-primary">
                   {isSelfFreeContribution
                     ? "Publish now"
-                    : experience.status === "REJECTED"
+                    : experience.status === "REJECTED" || experience.status === "CORRECTION_REQUESTED"
                       ? "Resubmit for review"
                       : "Submit for review"}
                 </button>

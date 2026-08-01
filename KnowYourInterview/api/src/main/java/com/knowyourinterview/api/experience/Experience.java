@@ -81,6 +81,25 @@ public class Experience {
     @Column(name = "rejection_reason", columnDefinition = "text")
     private String rejectionReason;
 
+    // Set alongside CORRECTION_REQUESTED — see requestCorrection(). Cleared on resubmit
+    // (markPendingReview()), same lifecycle as rejectionReason above.
+    @Column(name = "correction_notes", columnDefinition = "text")
+    private String correctionNotes;
+
+    // Submitter-authored, admin-only-visible — see ExperienceResponseAssembler and
+    // ExperienceService#getPublicView for where this gets redacted from a purchaser/
+    // free-viewer's response. Editable via the normal applyEdits path, but deliberately
+    // NOT part of the edit-history snapshot/diff mechanism (FieldValues in
+    // ExperienceService) — out of scope for that feature.
+    @Column(name = "confidential_note", columnDefinition = "text")
+    private String confidentialNote;
+
+    // Raw hit counter, not deduped by viewer/session — every load of a PUBLISHED
+    // experience's detail page counts, including repeat views by the same person. See
+    // ExperienceService#getPublicView, the only writer of this field.
+    @Column(name = "view_count", nullable = false)
+    private long viewCount;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -120,6 +139,7 @@ public class Experience {
             Short overallDifficulty,
             String timeline,
             String compensation,
+            String confidentialNote,
             long pricePaise) {
         this.id = id;
         this.contributorId = contributorId;
@@ -136,6 +156,7 @@ public class Experience {
         this.overallDifficulty = overallDifficulty;
         this.timeline = timeline;
         this.compensation = compensation;
+        this.confidentialNote = confidentialNote;
         this.pricePaise = pricePaise;
         this.status = ExperienceStatus.DRAFT;
         Instant now = Instant.now();
@@ -185,7 +206,8 @@ public class Experience {
             String prepAdvice,
             Short overallDifficulty,
             String timeline,
-            String compensation) {
+            String compensation,
+            String confidentialNote) {
         this.company = company;
         this.roleTitle = roleTitle;
         this.level = level;
@@ -199,15 +221,35 @@ public class Experience {
         this.overallDifficulty = overallDifficulty;
         this.timeline = timeline;
         this.compensation = compensation;
+        this.confidentialNote = confidentialNote;
         this.updatedAt = Instant.now();
     }
 
-    /** Also used to resubmit a REJECTED draft — clears the stale rejection reason so a
-     * fresh admin review isn't shown last time's verdict. */
+    /** Also used to resubmit a REJECTED or CORRECTION_REQUESTED draft — clears the stale
+     * rejection reason / correction notes so a fresh admin review isn't shown last
+     * round's verdict. */
     public void markPendingReview() {
         this.status = ExperienceStatus.PENDING_REVIEW;
         this.rejectionReason = null;
+        this.correctionNotes = null;
         this.updatedAt = Instant.now();
+    }
+
+    /** An admin reviewing a PENDING_REVIEW submission wants it fixed rather than
+     * outright rejected — pairs with the admin having (optionally) already edited the
+     * submission's fields directly via updateDraft before calling this. The contributor
+     * sees `notes` and can revise + resubmit (markPendingReview handles clearing it),
+     * same shape as the reject()/rejectionReason flow but a softer verdict. */
+    public void requestCorrection(String notes) {
+        this.status = ExperienceStatus.CORRECTION_REQUESTED;
+        this.correctionNotes = notes;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Raw hit counter — see the field's Javadoc. The only writer is
+     * ExperienceService#getPublicView. */
+    public void incrementViewCount() {
+        this.viewCount++;
     }
 
     public void publish() {
@@ -315,6 +357,18 @@ public class Experience {
 
     public String getRejectionReason() {
         return rejectionReason;
+    }
+
+    public String getCorrectionNotes() {
+        return correctionNotes;
+    }
+
+    public String getConfidentialNote() {
+        return confidentialNote;
+    }
+
+    public long getViewCount() {
+        return viewCount;
     }
 
     public Instant getCreatedAt() {

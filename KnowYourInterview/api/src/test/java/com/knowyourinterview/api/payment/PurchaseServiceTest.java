@@ -64,7 +64,7 @@ class PurchaseServiceTest {
         Experience experience = new Experience(
                 UUID.randomUUID(), UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Bengaluru",
                 true, (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser", "advice",
-                (short) 3, "3 weeks", "35 LPA", 19900);
+                (short) 3, "3 weeks", "35 LPA", null, 19900);
         experience.markPendingReview();
         experience.publish();
         return experience;
@@ -86,7 +86,7 @@ class PurchaseServiceTest {
         Experience draft = new Experience(
                 UUID.randomUUID(), UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Bengaluru",
                 true, (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser", "advice",
-                (short) 3, "3 weeks", "35 LPA", 19900);
+                (short) 3, "3 weeks", "35 LPA", null, 19900);
         when(experienceRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
 
         assertThatThrownBy(() -> service.createOrder(UUID.randomUUID(), draft.getId()))
@@ -276,7 +276,7 @@ class PurchaseServiceTest {
         Experience experience = new Experience(
                 experienceId, UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Bengaluru",
                 true, (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser", "advice",
-                (short) 3, "3 weeks", "35 LPA", 19900);
+                (short) 3, "3 weeks", "35 LPA", null, 19900);
         Purchase purchase = new Purchase(UUID.randomUUID(), userId, experienceId, 19900, "order_1");
         when(purchaseRepository.findByUserIdOrderByCreatedAtDesc(userId)).thenReturn(List.of(purchase));
         when(experienceRepository.findAllById(List.of(experienceId))).thenReturn(List.of(experience));

@@ -51,7 +51,7 @@ class PayoutServiceTest {
         return new Experience(
                 id, UUID.randomUUID(), "Acme", "Backend Engineer", "L4", "Bengaluru",
                 true, (short) 6, (short) 2026, ExperienceOutcome.OFFER, "teaser", "advice",
-                (short) 3, "3 weeks", "35 LPA", 19900);
+                (short) 3, "3 weeks", "35 LPA", null, 19900);
     }
 
     @Test
