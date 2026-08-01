@@ -11,6 +11,17 @@ export function interviewedLabel(month?: number, year?: number): string | null {
   return `Interviewed ${year}`;
 }
 
+/** "Posted 29 Jul 2026" / null (not published yet, or timestamp missing). Distinct from
+ * interviewedLabel above — this is when the write-up went live on Browse, not when the
+ * interview itself happened, so a viewer can tell a freshly submitted experience from an
+ * old one even when both are for the same interview year. */
+export function publishedLabel(publishedAt?: string): string | null {
+  if (!publishedAt) return null;
+  const date = new Date(publishedAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return `Posted ${date.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`;
+}
+
 export function roundCountLabel(roundCount: number): string {
   return roundCount === 1 ? "1 round" : `${roundCount} rounds`;
 }

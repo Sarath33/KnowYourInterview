@@ -30,7 +30,7 @@ public interface ExperienceRepository extends JpaRepository<Experience, UUID> {
               AND (:roleTitle IS NULL OR LOWER(e.roleTitle) = LOWER(CAST(:roleTitle AS string)))
               AND (:level IS NULL OR LOWER(e.level) = LOWER(CAST(:level AS string)))
               AND (:year IS NULL OR e.interviewYear = :year)
-              AND (:outcome IS NULL OR e.outcome = :outcome)
+              AND (:isFree IS NULL OR e.free = :isFree)
               AND (:searchPattern IS NULL
                    OR LOWER(e.company) LIKE CAST(:searchPattern AS string)
                    OR LOWER(e.roleTitle) LIKE CAST(:searchPattern AS string)
@@ -41,7 +41,7 @@ public interface ExperienceRepository extends JpaRepository<Experience, UUID> {
             @Param("roleTitle") String roleTitle,
             @Param("level") String level,
             @Param("year") Short year,
-            @Param("outcome") ExperienceOutcome outcome,
+            @Param("isFree") Boolean isFree,
             @Param("searchPattern") String searchPattern,
             Pageable pageable);
 }

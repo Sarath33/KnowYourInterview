@@ -286,10 +286,36 @@
   font-size: 14px;
   color: var(--text-primary);
   background: var(--surface);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.text-input:focus,
+.textarea:focus,
+.select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
 }
 
 .textarea {
   resize: vertical;
+}
+
+/* Custom chevron replaces the browser's native select styling, which looks dated and is
+ * inconsistent across OSes/browsers — appearance: none strips it, the SVG background
+ * redraws a single, on-brand arrow instead. */
+.select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'><path d='M1 1l4 4 4-4' stroke='%23667085' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+.select:hover {
+  border-color: var(--accent);
 }
 
 .checkbox-field {

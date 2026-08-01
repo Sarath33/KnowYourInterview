@@ -873,14 +873,14 @@ class ExperienceServiceTest {
     }
 
     @Test
-    void browsePublishedPassesTheOutcomeFilterThrough() {
+    void browsePublishedPassesTheIsFreeFilterThrough() {
         Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
         when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), any())).thenReturn(page);
 
-        service.browsePublished(null, null, null, null, null, ExperienceOutcome.OFFER, null, "newest", 0, 20);
+        service.browsePublished(null, null, null, null, null, Boolean.TRUE, null, "newest", 0, 20);
 
         verify(experienceRepository).browsePublished(
-                eq(null), eq(null), eq(null), eq(null), eq(ExperienceOutcome.OFFER), eq(null), any());
+                eq(null), eq(null), eq(null), eq(null), eq(Boolean.TRUE), eq(null), any());
     }
 
     @Test

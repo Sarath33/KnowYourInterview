@@ -1,30 +1,31 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import type { ExperienceOutcome } from "../../../shared/types";
 import * as api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../lib/useAsync";
 import { OutcomeTag, RemoteTag, UnlockedTag } from "./tags";
 import { ArrowRightIcon } from "./icons";
-import { formatPaise, interviewedLabel, levelLine, roundCountLabel } from "../lib/format";
+import { formatPaise, interviewedLabel, levelLine, publishedLabel, roundCountLabel } from "../lib/format";
 
 const PAGE_SIZE = 20;
+
+type Pricing = "" | "PAID" | "FREE";
 
 interface Filters {
   company: string;
   roleTitle: string;
   level: string;
   year: string;
-  outcome: ExperienceOutcome | "";
+  pricing: Pricing;
   search: string;
 }
 
-const emptyFilters: Filters = { company: "", roleTitle: "", level: "", year: "", outcome: "", search: "" };
+const emptyFilters: Filters = { company: "", roleTitle: "", level: "", year: "", pricing: "PAID", search: "" };
 
-const OUTCOME_LABELS: Record<ExperienceOutcome, string> = {
-  OFFER: "Offer",
-  REJECTED: "Rejected",
-  WITHDRAWN: "Withdrawn",
+const PRICING_LABELS: Record<Pricing, string> = {
+  "": "All",
+  PAID: "Paid",
+  FREE: "Free",
 };
 
 type SortOption = "newest" | "priceLow" | "priceHigh";
@@ -52,7 +53,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
         roleTitle: appliedFilters.roleTitle || undefined,
         level: appliedFilters.level || undefined,
         year: appliedFilters.year ? Number(appliedFilters.year) : undefined,
-        outcome: appliedFilters.outcome || undefined,
+        isFree: appliedFilters.pricing === "" ? undefined : appliedFilters.pricing === "FREE",
         search: appliedFilters.search || undefined,
         sort,
         page,
@@ -78,7 +79,12 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
   };
 
   const hasFilters =
-    filters.company || filters.roleTitle || filters.level || filters.year || filters.outcome || filters.search;
+    filters.company ||
+    filters.roleTitle ||
+    filters.level ||
+    filters.year ||
+    filters.pricing !== emptyFilters.pricing ||
+    filters.search;
 
   return (
     <div>
@@ -161,20 +167,27 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
           style={{ width: 110 }}
         />
         <select
-          aria-label="Outcome"
-          value={filters.outcome}
-          onChange={(e) => setFilters({ ...filters, outcome: e.target.value as ExperienceOutcome | "" })}
+          aria-label="Pricing"
+          value={filters.pricing}
+          onChange={(e) => {
+            // Unlike the free-text inputs (which need the Filter button, since firing a
+            // fetch on every keystroke would be wasteful), a dropdown pick is a single
+            // deliberate action — apply it immediately, same as the sort dropdown does.
+            const next = { ...filters, pricing: e.target.value as Pricing };
+            setFilters(next);
+            setAppliedFilters(next);
+            setPage(0);
+          }}
           className="select"
-          style={{ width: 150 }}
+          style={{ width: 130 }}
         >
-          <option value="">Any outcome</option>
-          {(Object.keys(OUTCOME_LABELS) as ExperienceOutcome[]).map((o) => (
-            <option key={o} value={o}>
-              {OUTCOME_LABELS[o]}
+          {(Object.keys(PRICING_LABELS) as Pricing[]).map((p) => (
+            <option key={p} value={p}>
+              {PRICING_LABELS[p]}
             </option>
           ))}
         </select>
-        <button type="submit" className="btn btn-outline">
+        <button type="submit" className="btn btn-primary">
           Filter
         </button>
         {hasFilters && (
@@ -196,6 +209,7 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
           <div className="browse-grid">
             {items.map((exp) => {
               const recency = interviewedLabel(exp.interviewMonth, exp.interviewYear);
+              const posted = publishedLabel(exp.publishedAt);
               return (
                 <div key={exp.id} className="card card-pad-sm browse-card">
                   <div className="card-kicker">{levelLine(exp)}</div>
@@ -209,10 +223,14 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
                     <OutcomeTag outcome={exp.outcome} />
                     {exp.isRemote && <RemoteTag />}
                     <span className="tag tag-neutral">{roundCountLabel(exp.roundCount)}</span>
-                    {exp.unlocked && <UnlockedTag />}
+                    {exp.unlocked && !exp.isFree && <UnlockedTag />}
                   </div>
-                  {recency && (
-                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{recency}</div>
+                  {(recency || posted) && (
+                    <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                      {recency}
+                      {recency && posted && " · "}
+                      {posted}
+                    </div>
                   )}
                   <div className="browse-card-footer">
                     <span className="price-tag">{exp.isFree ? "Free" : formatPaise(exp.pricePaise)}</span>

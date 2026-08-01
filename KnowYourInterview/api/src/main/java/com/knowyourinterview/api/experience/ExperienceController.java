@@ -144,14 +144,14 @@ public class ExperienceController {
             @RequestParam(required = false) String roleTitle,
             @RequestParam(required = false) String level,
             @RequestParam(required = false) Short year,
-            @RequestParam(required = false) ExperienceOutcome outcome,
+            @RequestParam(required = false) Boolean isFree,
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "newest") String sort,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         UUID viewerId = user == null ? null : user.id();
         return experienceService.browsePublished(
-                viewerId, company, roleTitle, level, year, outcome, search, sort, page, size);
+                viewerId, company, roleTitle, level, year, isFree, search, sort, page, size);
     }
 
     @GetMapping("/{id}")

@@ -365,10 +365,10 @@ public class ExperienceService {
 
     @Transactional(readOnly = true)
     public PagedResponse<ExperienceTeaserResponse> browsePublished(
-            UUID viewerId, String company, String roleTitle, String level, Short year, ExperienceOutcome outcome,
+            UUID viewerId, String company, String roleTitle, String level, Short year, Boolean isFree,
             String search, String sort, int page, int size) {
         Page<Experience> result = experienceRepository.browsePublished(
-                blankToNull(company), blankToNull(roleTitle), blankToNull(level), year, outcome, searchPattern(search),
+                blankToNull(company), blankToNull(roleTitle), blankToNull(level), year, isFree, searchPattern(search),
                 PageRequest.of(page, Math.min(size, maxPageSize), resolveSort(sort)));
         List<UUID> ids = result.getContent().stream().map(Experience::getId).toList();
         // An empty IN (...) list is invalid JPQL for most providers — skip the query(ies)

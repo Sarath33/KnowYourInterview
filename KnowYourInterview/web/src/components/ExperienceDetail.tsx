@@ -190,6 +190,7 @@ function FullExperience({
   onUnpublish: () => void;
 }) {
   const hasStats = full.timeline || full.compensation || full.overallDifficulty;
+  const isSelfFreeContribution = full.isFree && !full.sourceUrl;
   const canUnpublish =
     full.status === "PUBLISHED" && !!user && (user.id === full.contributorId || user.isAdmin);
   const recency = interviewedLabel(full.interviewMonth, full.interviewYear);
@@ -225,13 +226,21 @@ function FullExperience({
         </div>
       )}
 
-      {canUnpublish && (
+      {canUnpublish && !isSelfFreeContribution && (
         <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 20 }}>
           <button type="button" onClick={onUnpublish} disabled={unpublishing} className="btn-danger-text" style={{ padding: 0 }}>
             {unpublishing ? "Unpublishing…" : "Unpublish"}
           </button>{" "}
           — pulls this from Browse and sends it back through review before it's live
           again. Anyone who already unlocked it keeps their access.
+        </p>
+      )}
+      {canUnpublish && isSelfFreeContribution && (
+        <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 20 }}>
+          <button type="button" onClick={onUnpublish} disabled={unpublishing} className="btn-danger-text" style={{ padding: 0 }}>
+            {unpublishing ? "Unpublishing…" : "Unpublish"}
+          </button>{" "}
+          — pulls this from Browse. Resubmitting publishes it again immediately, no review needed.
         </p>
       )}
 

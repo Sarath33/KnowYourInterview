@@ -5,7 +5,6 @@ import type {
   GoogleLoginRequest,
   AuthResponse,
   ApiErrorBody,
-  ExperienceOutcome,
   ExperienceRequest,
   RoundRequest,
   RejectRequest,
@@ -277,7 +276,7 @@ export async function browseExperiences(params: {
   roleTitle?: string;
   level?: string;
   year?: number;
-  outcome?: ExperienceOutcome;
+  isFree?: boolean;
   search?: string;
   sort?: "newest" | "priceLow" | "priceHigh";
   page?: number;
