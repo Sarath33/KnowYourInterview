@@ -21,6 +21,7 @@ import org.springframework.web.multipart.support.MissingServletRequestPartExcept
 
 import com.knowyourinterview.api.auth.AdminBootstrapNotConfiguredException;
 import com.knowyourinterview.api.auth.EmailAlreadyRegisteredException;
+import com.knowyourinterview.api.auth.EmailNotVerifiedException;
 import com.knowyourinterview.api.auth.GoogleAuthNotConfiguredException;
 import com.knowyourinterview.api.auth.InvalidCredentialsException;
 import com.knowyourinterview.api.auth.InvalidTokenException;
@@ -52,6 +53,14 @@ public class ApiExceptionHandler {
     @ExceptionHandler(InvalidTokenException.class)
     public ResponseEntity<Map<String, Object>> handleInvalidToken(InvalidTokenException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(body(HttpStatus.UNAUTHORIZED, ex.getMessage(), null));
+    }
+
+    /** Authenticated, but not yet permitted this action — see EmailNotVerifiedException for
+     * why this is a 403 rather than a 401. The message is written to be shown to the user
+     * verbatim; the web client surfaces it next to the blocked action. */
+    @ExceptionHandler(EmailNotVerifiedException.class)
+    public ResponseEntity<Map<String, Object>> handleEmailNotVerified(EmailNotVerifiedException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body(HttpStatus.FORBIDDEN, ex.getMessage(), null));
     }
 
     @ExceptionHandler(GoogleAuthNotConfiguredException.class)

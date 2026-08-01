@@ -17,7 +17,9 @@ import com.knowyourinterview.api.auth.dto.LogoutRequest;
 import com.knowyourinterview.api.auth.dto.MessageResponse;
 import com.knowyourinterview.api.auth.dto.RefreshRequest;
 import com.knowyourinterview.api.auth.dto.RegisterRequest;
+import com.knowyourinterview.api.auth.dto.ResendVerificationRequest;
 import com.knowyourinterview.api.auth.dto.ResetPasswordRequest;
+import com.knowyourinterview.api.auth.dto.VerifyEmailRequest;
 
 import jakarta.validation.Valid;
 
@@ -26,9 +28,11 @@ import jakarta.validation.Valid;
 public class AuthController {
 
     private final AuthService authService;
+    private final EmailVerificationService emailVerificationService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, EmailVerificationService emailVerificationService) {
         this.authService = authService;
+        this.emailVerificationService = emailVerificationService;
     }
 
     @PostMapping("/register")
@@ -72,6 +76,31 @@ public class AuthController {
     public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         authService.resetPassword(request.token(), request.newPassword());
         return ResponseEntity.ok(new MessageResponse("Password updated."));
+    }
+
+    /**
+     * Redeems a confirmation link. Public: the person clicking it may well not be signed in
+     * on the device that opened their email, and possession of the token is the proof —
+     * requiring a session on top would only lock out the case this exists to serve.
+     */
+    @PostMapping("/verify-email")
+    public ResponseEntity<MessageResponse> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        emailVerificationService.verify(request.token());
+        return ResponseEntity.ok(new MessageResponse("Email confirmed."));
+    }
+
+    /**
+     * Sends a fresh confirmation link, invalidating any previous one. Generic response
+     * regardless of whether the address exists or is already confirmed — same
+     * no-enumeration posture as forgot-password. Rate-limited harder than the rest of
+     * /auth/** (see RateLimitingFilter) because the abuse here lands in someone else's inbox.
+     */
+    @PostMapping("/resend-verification")
+    public ResponseEntity<MessageResponse> resendVerification(
+            @Valid @RequestBody ResendVerificationRequest request) {
+        emailVerificationService.resend(request.email());
+        return ResponseEntity.ok(new MessageResponse(
+                "If that account exists and isn't confirmed yet, a new link is on its way."));
     }
 
     // Secret-gated, not JWT-gated — see AuthService#bootstrapAdmin for why (no admin

@@ -24,6 +24,7 @@ function stubAuth(overrides: Partial<ReturnType<typeof useAuth>> = {}) {
     login: vi.fn(),
     googleLogin: vi.fn(),
     logout: vi.fn(),
+    refreshSession: vi.fn(),
     ...overrides,
   });
 }
@@ -127,6 +128,7 @@ describe("ExperienceDetail", () => {
       email: "jane@example.com",
       displayName: "Jane",
       isAdmin: false,
+      emailVerified: true,
       createdAt: new Date().toISOString(),
     };
     stubAuth({ isAuthenticated: true, accessToken: "token-1", user });
@@ -160,5 +162,27 @@ describe("ExperienceDetail", () => {
       }),
     );
     expect(open).toHaveBeenCalledTimes(1);
+  });
+
+  /** The server rejects an unconfirmed purchase anyway (EmailVerificationGuard), so this is
+   * about not walking someone into a Razorpay modal that was always going to fail — and about
+   * telling them why the button is dead. */
+  it("disables Unlock for an unconfirmed email and explains why", async () => {
+    const user: User = {
+      id: "user-1",
+      email: "jane@example.com",
+      displayName: "Jane",
+      isAdmin: false,
+      emailVerified: false,
+      createdAt: new Date().toISOString(),
+    };
+    stubAuth({ isAuthenticated: true, accessToken: "token-1", user });
+    mockedApi.getExperience.mockResolvedValue({ entitled: false, teaser });
+
+    render(<ExperienceDetail experienceId="exp-1" onClose={vi.fn()} onLoginRequired={vi.fn()} />);
+
+    expect(await screen.findByRole("button", { name: /Unlock ₹199\.00/ })).toBeDisabled();
+    expect(screen.getByText(/Confirm your email address first/)).toBeInTheDocument();
+    expect(mockedApi.createPurchaseOrder).not.toHaveBeenCalled();
   });
 });

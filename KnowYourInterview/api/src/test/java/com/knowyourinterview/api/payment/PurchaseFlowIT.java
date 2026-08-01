@@ -191,7 +191,27 @@ class PurchaseFlowIT {
                 .containsExactly(com.knowyourinterview.api.payout.Payout.Status.PAID);
     }
 
+    /**
+     * Registers and confirms the address, since submitting and purchasing are both gated on
+     * a confirmed email (see EmailVerificationGuard). The confirmation is applied directly
+     * rather than by clicking a link, because the only copy of the raw token leaves in the
+     * email — the database stores a hash — so there's nothing for a test to redeem. The gate
+     * itself is exercised separately, by {@link #unconfirmedAccountsCannotSubmitOrPurchase()}.
+     * <p>
+     * No re-login needed afterwards, unlike registerAdmin: the guard reads the database on
+     * every call rather than trusting a JWT claim, precisely so a confirmation takes effect
+     * without waiting for a new token.
+     */
     private AuthResponse register(String displayName, String email) {
+        AuthResponse response = restTemplate.postForObject(
+                "/api/v1/auth/register", new RegisterBody(email, "correct-horse-battery-staple", displayName),
+                AuthResponse.class);
+        jdbcTemplate.update("UPDATE users SET email_verified = true WHERE email = ?", email);
+        return response;
+    }
+
+    /** Registers without confirming — for the gate test below. */
+    private AuthResponse registerUnconfirmed(String displayName, String email) {
         return restTemplate.postForObject(
                 "/api/v1/auth/register", new RegisterBody(email, "correct-horse-battery-staple", displayName),
                 AuthResponse.class);
@@ -205,6 +225,48 @@ class PurchaseFlowIT {
         jdbcTemplate.update("UPDATE users SET is_admin = true WHERE email = ?", email);
         return restTemplate.postForObject(
                 "/api/v1/auth/login", new LoginBody(email, "correct-horse-battery-staple"), AuthResponse.class);
+    }
+
+    /**
+     * The gate, against the real stack: a freshly registered account can log in and browse
+     * but can't start a submission or open a checkout until it confirms its address.
+     * <p>
+     * Worth having as an IT rather than only as a unit test, because the interesting part is
+     * that it's a 403 rather than a 401 — a 401 would send the web client into a token
+     * refresh and then a logout, which is exactly the wrong outcome for "confirm your email".
+     * That distinction only shows up once the real filter chain and exception handler are in
+     * the path.
+     */
+    @Test
+    void unconfirmedAccountsCannotSubmitOrPurchase() {
+        AuthResponse unconfirmed = registerUnconfirmed("Newcomer", unique("newcomer"));
+
+        ResponseEntity<String> draftAttempt = post(
+                "/api/v1/experiences", unconfirmed.accessToken(),
+                """
+                {"company":"Acme","roleTitle":"Backend Engineer","isRemote":true,
+                 "outcome":"OFFER","teaser":"Solid onsite loop.","freeContribution":false}
+                """,
+                String.class);
+        assertThat(draftAttempt.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(draftAttempt.getBody()).contains("Confirm your email");
+
+        // Reading is deliberately still open — the gate is on contributing and paying.
+        ResponseEntity<String> browse = restTemplate.getForEntity("/api/v1/experiences?page=0&size=1", String.class);
+        assertThat(browse.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // ...and confirming lifts it immediately, with no new token needed, because the
+        // guard reads the database rather than a claim baked into the access token.
+        jdbcTemplate.update("UPDATE users SET email_verified = true WHERE email = ?", unconfirmed.user().email());
+
+        ResponseEntity<ExperienceFullResponse> retried = post(
+                "/api/v1/experiences", unconfirmed.accessToken(),
+                """
+                {"company":"Acme","roleTitle":"Backend Engineer","isRemote":true,
+                 "outcome":"OFFER","teaser":"Solid onsite loop.","freeContribution":false}
+                """,
+                ExperienceFullResponse.class);
+        assertThat(retried.getStatusCode()).isEqualTo(HttpStatus.CREATED);
     }
 
     private void uploadProof(UUID experienceId, String accessToken) {

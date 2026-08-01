@@ -35,6 +35,14 @@ public class SecurityConfig {
     @Value("${CORS_ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}")
     private String corsAllowedOrigins;
 
+    // Whether a trusted proxy sits in front of this app and sets X-Forwarded-For. Off by
+    // default (correct for local dev and for anything directly internet-facing, where the
+    // header is attacker-controlled); set TRUST_FORWARDED_FOR=true in any deployment behind
+    // a load balancer/CDN, or the rate limiter buckets the whole internet under the proxy's
+    // one IP. See RateLimitingFilter's Javadoc.
+    @Value("${app.rate-limit.trust-forwarded-for:false}")
+    private boolean trustForwardedFor;
+
     public SecurityConfig(JwtService jwtService, StringRedisTemplate redisTemplate) {
         this.jwtService = jwtService;
         this.redisTemplate = redisTemplate;
@@ -115,7 +123,8 @@ public class SecurityConfig {
                 // UsernamePasswordAuthenticationFilter anchor above) so it's guaranteed to
                 // run strictly before it — rejecting a rate-limited request before bothering
                 // to parse its JWT.
-                .addFilterBefore(new RateLimitingFilter(redisTemplate), JwtAuthenticationFilter.class);
+                .addFilterBefore(
+                        new RateLimitingFilter(redisTemplate, trustForwardedFor), JwtAuthenticationFilter.class);
 
         return http.build();
     }

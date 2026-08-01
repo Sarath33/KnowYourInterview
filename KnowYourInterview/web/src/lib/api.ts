@@ -5,6 +5,11 @@ import type {
   GoogleLoginRequest,
   AuthResponse,
   ApiErrorBody,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
+  VerifyEmailRequest,
+  ResendVerificationRequest,
+  MessageResponse,
   ExperienceRequest,
   RoundRequest,
   RejectRequest,
@@ -181,6 +186,56 @@ export async function logout(refreshToken: string): Promise<void> {
   );
 }
 
+/**
+ * Asks for a reset link. Always resolves for a well-formed email, whether or not an account
+ * exists — the backend deliberately gives no user-enumeration signal, so the caller must not
+ * present the response as confirmation that the address is registered.
+ *
+ * Note that no email is actually sent yet: AuthService#forgotPassword logs the link
+ * server-side instead (no email provider is wired up). The UI copy reflects that.
+ */
+export async function forgotPassword(body: ForgotPasswordRequest): Promise<MessageResponse> {
+  return request<MessageResponse>(
+    "/api/v1/auth/forgot-password",
+    { method: "POST", body: JSON.stringify(body) },
+    { skipAuthRefresh: true },
+  );
+}
+
+/** Consumes the single-use token from a reset link and sets a new password. 401 if the token
+ * is unknown, already used, or expired. skipAuthRefresh like the other auth calls — this runs
+ * for a signed-out user, so a 401 here means "bad token", not "session expired". */
+export async function resetPassword(body: ResetPasswordRequest): Promise<MessageResponse> {
+  return request<MessageResponse>(
+    "/api/v1/auth/reset-password",
+    { method: "POST", body: JSON.stringify(body) },
+    { skipAuthRefresh: true },
+  );
+}
+
+/** Redeems a confirmation link. skipAuthRefresh matters here: the person clicking the link
+ * often isn't signed in on the device that opened their email, and a 401 from this endpoint
+ * means "bad token" — letting the generic handler treat it as an expired session would bounce
+ * them to /login mid-confirmation. */
+export async function verifyEmail(body: VerifyEmailRequest): Promise<MessageResponse> {
+  return request<MessageResponse>(
+    "/api/v1/auth/verify-email",
+    { method: "POST", body: JSON.stringify(body) },
+    { skipAuthRefresh: true },
+  );
+}
+
+/** Sends a fresh confirmation link and invalidates any earlier one. Resolves the same way for
+ * any address — an unknown or already-confirmed one included — so don't present the result as
+ * proof the account exists. */
+export async function resendVerification(body: ResendVerificationRequest): Promise<MessageResponse> {
+  return request<MessageResponse>(
+    "/api/v1/auth/resend-verification",
+    { method: "POST", body: JSON.stringify(body) },
+    { skipAuthRefresh: true },
+  );
+}
+
 // --- Experiences (contributor) ---
 
 export async function createExperience(body: ExperienceRequest): Promise<ExperienceFull> {
@@ -279,7 +334,7 @@ export async function browseExperiences(params: {
   year?: number;
   isFree?: boolean;
   search?: string;
-  sort?: "newest" | "priceLow" | "priceHigh";
+  sort?: "newest" | "priceLow" | "priceHigh" | "mostViewed";
   page?: number;
   size?: number;
 }): Promise<PagedResponse<ExperienceTeaser>> {

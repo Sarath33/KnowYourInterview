@@ -36,6 +36,16 @@ public class User {
     @Column(name = "is_admin", nullable = false)
     private boolean admin;
 
+    // Whether this address has been confirmed by someone who can actually receive mail at
+    // it. False for a fresh email/password registration until they click the link; true from
+    // the start for a Google signup (Google has already verified it — see forGoogleSignup)
+    // and for every account that existed before V11, which backfilled them all rather than
+    // locking out live users. Read by EmailVerificationGuard, which is what gates submitting
+    // and purchasing; deliberately NOT a login requirement, so an unconfirmed user can still
+    // get in and browse.
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -57,10 +67,14 @@ public class User {
         this.updatedAt = now;
     }
 
-    /** Google Sign-In signup: no password_hash — googleSub is the only credential. */
+    /** Google Sign-In signup: no password_hash — googleSub is the only credential. Starts
+     * email-verified, because Google has already done exactly the check a confirmation email
+     * would do (and AuthService only accepts the address when the ID token's email_verified
+     * claim is set), so making these accounts click a second link would be theatre. */
     public static User forGoogleSignup(UUID id, String email, String displayName, String googleSub) {
         User user = new User(id, email, null, displayName);
         user.googleSub = googleSub;
+        user.emailVerified = true;
         return user;
     }
 
@@ -94,9 +108,27 @@ public class User {
     }
 
     /** Links an existing (previously email/password-only) account to a Google account the
-     * first time its owner uses "Sign in with Google" with a matching, verified email. */
+     * first time its owner uses "Sign in with Google" with a matching, verified email.
+     * That sign-in also confirms the address: reaching this method means Google vouched for
+     * the same email the account was registered with, which is precisely what a confirmation
+     * link proves. So signing in with Google is a second, equally valid way to clear a
+     * pending confirmation — a user who never opened the email isn't stuck. */
     public void linkGoogleSub(String googleSub) {
         this.googleSub = googleSub;
+        this.emailVerified = true;
+        this.updatedAt = Instant.now();
+    }
+
+    public boolean isEmailVerified() {
+        return emailVerified;
+    }
+
+    /** Idempotent by nature — confirming an already-confirmed address is a no-op rather than
+     * an error, since a user clicking their link twice hasn't done anything wrong. The
+     * single-use check on the token itself (EmailVerificationToken#isUsed) is what stops a
+     * leaked link from being replayed indefinitely. */
+    public void markEmailVerified() {
+        this.emailVerified = true;
         this.updatedAt = Instant.now();
     }
 

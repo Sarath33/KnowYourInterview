@@ -21,10 +21,26 @@ import jakarta.servlet.http.HttpServletResponse;
  *
  * Deliberately IP-only, not per-account (no request-body parsing to pull out the
  * email — that would need a ContentCachingRequestWrapper for not much extra value at
- * this scale). Also doesn't attempt to trust X-Forwarded-For, since there's no
- * configured trusted-proxy list yet — behind a real load balancer/CDN this should be
- * revisited (Spring's ForwardedHeaderFilter + a trusted-proxy allowlist), otherwise
- * X-Forwarded-For is trivially spoofable and this would just rate-limit the proxy.
+ * this scale).
+ *
+ * <h2>Which IP counts</h2>
+ * Whether X-Forwarded-For is trusted is a deployment fact, not a code one, so it's a
+ * config flag ({@code app.rate-limit.trust-forwarded-for}, env var
+ * {@code TRUST_FORWARDED_FOR}) that defaults to <b>false</b>:
+ * <ul>
+ *   <li><b>false</b> (local dev, or anything directly internet-facing) — key on
+ *       {@code getRemoteAddr()}. Trusting the header here would make the limiter
+ *       useless, since any client can send whatever X-Forwarded-For it likes.</li>
+ *   <li><b>true</b> (behind a proxy that always overwrites the header — Railway's edge,
+ *       an ALB, Cloudflare) — key on the left-most X-Forwarded-For hop, which is the
+ *       original client. Without this, every request appears to come from the proxy's
+ *       single IP and the limits become global: 10 logins per minute for the entire
+ *       user base, not per user. That's the failure mode this flag exists to fix, and
+ *       it's the one that was live in production before it existed.</li>
+ * </ul>
+ * Only set it to true when a trusted proxy really is in front — the flag is the
+ * "trusted-proxy allowlist" in its simplest possible form (one bit: is there a proxy or
+ * not), which is sufficient because the app is never reachable both ways at once.
  *
  * Not a @Component: registered explicitly in SecurityConfig via addFilterBefore, same
  * as JwtAuthenticationFilter — a @Component Filter would additionally get
@@ -46,12 +62,25 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             // Tight — this is a brute-forceable secret that grants admin. The endpoint
             // itself is a constant-time comparison (see AuthService#bootstrapAdmin), but a
             // rate limit is still the first line of defense against guessing it at all.
-            "/api/v1/auth/bootstrap-admin", new Limit(5, Duration.ofMinutes(1)));
+            "/api/v1/auth/bootstrap-admin", new Limit(5, Duration.ofMinutes(1)),
+            // Tighter than anything else here, because the abuse doesn't land on us — it
+            // lands in a third party's inbox. Someone hammering this with a stranger's
+            // address is using the app to send them mail, and a legitimate user needs it
+            // roughly once.
+            "/api/v1/auth/resend-verification", new Limit(3, Duration.ofMinutes(1)),
+            // Loose by comparison: the token is 256 bits of randomness, so brute-forcing it
+            // isn't the threat model — this is just a backstop against someone pointing a
+            // script at it. Matches reset-password, which redeems a token the same way.
+            "/api/v1/auth/verify-email", new Limit(10, Duration.ofMinutes(1)));
+
+    private static final String FORWARDED_FOR = "X-Forwarded-For";
 
     private final StringRedisTemplate redisTemplate;
+    private final boolean trustForwardedFor;
 
-    public RateLimitingFilter(StringRedisTemplate redisTemplate) {
+    public RateLimitingFilter(StringRedisTemplate redisTemplate, boolean trustForwardedFor) {
         this.redisTemplate = redisTemplate;
+        this.trustForwardedFor = trustForwardedFor;
     }
 
     @Override
@@ -66,7 +95,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             return;
         }
 
-        String key = "ratelimit:" + request.getRequestURI() + ":" + request.getRemoteAddr();
+        String key = "ratelimit:" + request.getRequestURI() + ":" + clientIp(request);
         Long count = redisTemplate.opsForValue().increment(key);
         if (count != null && count == 1L) {
             redisTemplate.expire(key, limit.window());
@@ -82,5 +111,28 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * The address to bucket this request under. See the class Javadoc for why this is
+     * configurable rather than always one or the other.
+     * <p>
+     * X-Forwarded-For is a comma-separated chain (client, proxy1, proxy2…) — the left-most
+     * entry is the original client. A trusted proxy overwrites rather than appends to any
+     * client-supplied header, so that entry is only as trustworthy as the flag says it is.
+     * Falls back to getRemoteAddr() when the header is absent or empty, so a request that
+     * somehow reaches the app without going through the proxy still gets limited rather
+     * than sailing past on a null key.
+     */
+    private String clientIp(HttpServletRequest request) {
+        if (!trustForwardedFor) {
+            return request.getRemoteAddr();
+        }
+        String forwarded = request.getHeader(FORWARDED_FOR);
+        if (forwarded == null || forwarded.isBlank()) {
+            return request.getRemoteAddr();
+        }
+        String first = forwarded.split(",", 2)[0].trim();
+        return first.isEmpty() ? request.getRemoteAddr() : first;
     }
 }

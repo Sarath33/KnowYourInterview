@@ -4,7 +4,9 @@ import * as api from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useAsync } from "../lib/useAsync";
 import { OutcomeTag, RemoteTag, UnlockedTag } from "./tags";
-import { ArrowRightIcon } from "./icons";
+import { ArrowDownIcon, ArrowRightIcon, ArrowUpIcon, ClockIcon, EyeIcon } from "./icons";
+import { DropdownMenu } from "./DropdownMenu";
+import type { DropdownOption } from "./DropdownMenu";
 import { formatPaise, interviewedLabel, levelLine, publishedLabel, roundCountLabel, viewCountLabel } from "../lib/format";
 
 const PAGE_SIZE = 20;
@@ -14,27 +16,27 @@ type Pricing = "" | "PAID" | "FREE";
 interface Filters {
   company: string;
   roleTitle: string;
-  level: string;
   year: string;
   pricing: Pricing;
   search: string;
 }
 
-const emptyFilters: Filters = { company: "", roleTitle: "", level: "", year: "", pricing: "PAID", search: "" };
+const emptyFilters: Filters = { company: "", roleTitle: "", year: "", pricing: "", search: "" };
 
-const PRICING_LABELS: Record<Pricing, string> = {
-  "": "All",
-  PAID: "Paid",
-  FREE: "Free",
-};
+const PRICING_OPTIONS: DropdownOption<Pricing>[] = [
+  { value: "", label: "All" },
+  { value: "PAID", label: "Paid" },
+  { value: "FREE", label: "Free" },
+];
 
-type SortOption = "newest" | "priceLow" | "priceHigh";
+type SortOption = "newest" | "priceLow" | "priceHigh" | "mostViewed";
 
-const SORT_LABELS: Record<SortOption, string> = {
-  newest: "Newest first",
-  priceLow: "Price: low to high",
-  priceHigh: "Price: high to low",
-};
+const SORT_OPTIONS: DropdownOption<SortOption>[] = [
+  { value: "newest", label: "Newest first", icon: <ClockIcon /> },
+  { value: "priceLow", label: "Price: low to high", icon: <ArrowUpIcon /> },
+  { value: "priceHigh", label: "Price: high to low", icon: <ArrowDownIcon /> },
+  { value: "mostViewed", label: "Most viewed", icon: <EyeIcon /> },
+];
 
 export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: string) => void }) {
   const { accessToken } = useAuth();
@@ -51,7 +53,6 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
       api.browseExperiences({
         company: appliedFilters.company || undefined,
         roleTitle: appliedFilters.roleTitle || undefined,
-        level: appliedFilters.level || undefined,
         year: appliedFilters.year ? Number(appliedFilters.year) : undefined,
         isFree: appliedFilters.pricing === "" ? undefined : appliedFilters.pricing === "FREE",
         search: appliedFilters.search || undefined,
@@ -81,7 +82,6 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
   const hasFilters =
     filters.company ||
     filters.roleTitle ||
-    filters.level ||
     filters.year ||
     filters.pricing !== emptyFilters.pricing ||
     filters.search;
@@ -102,25 +102,17 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
           <div className="page-kicker">Marketplace</div>
           <h1 className="page-title">Browse published experiences</h1>
         </div>
-        <div className="field" style={{ minWidth: 180 }}>
-          <label className="field-label" htmlFor="sort-select">
-            Sort by
-          </label>
-          <select
-            id="sort-select"
-            className="select"
+        <div className="field" style={{ minWidth: 190 }}>
+          <span className="field-label">Sort by</span>
+          <DropdownMenu
+            ariaLabel="Sort by"
             value={sort}
-            onChange={(e) => {
-              setSort(e.target.value as SortOption);
+            options={SORT_OPTIONS}
+            onChange={(next) => {
+              setSort(next);
               setPage(0);
             }}
-          >
-            {(Object.keys(SORT_LABELS) as SortOption[]).map((s) => (
-              <option key={s} value={s}>
-                {SORT_LABELS[s]}
-              </option>
-            ))}
-          </select>
+          />
         </div>
       </div>
 
@@ -150,14 +142,6 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
           style={{ width: 180 }}
         />
         <input
-          aria-label="Level (e.g. L4)"
-          placeholder="Level (e.g. L4)"
-          value={filters.level}
-          onChange={(e) => setFilters({ ...filters, level: e.target.value })}
-          className="text-input"
-          style={{ width: 140 }}
-        />
-        <input
           aria-label="Year"
           placeholder="Year"
           type="number"
@@ -166,27 +150,21 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
           className="text-input"
           style={{ width: 110 }}
         />
-        <select
-          aria-label="Pricing"
+        <DropdownMenu
+          ariaLabel="Pricing"
+          minWidth={110}
           value={filters.pricing}
-          onChange={(e) => {
+          options={PRICING_OPTIONS}
+          onChange={(next) => {
             // Unlike the free-text inputs (which need the Filter button, since firing a
             // fetch on every keystroke would be wasteful), a dropdown pick is a single
             // deliberate action — apply it immediately, same as the sort dropdown does.
-            const next = { ...filters, pricing: e.target.value as Pricing };
-            setFilters(next);
-            setAppliedFilters(next);
+            const nextFilters = { ...filters, pricing: next };
+            setFilters(nextFilters);
+            setAppliedFilters(nextFilters);
             setPage(0);
           }}
-          className="select"
-          style={{ width: 130 }}
-        >
-          {(Object.keys(PRICING_LABELS) as Pricing[]).map((p) => (
-            <option key={p} value={p}>
-              {PRICING_LABELS[p]}
-            </option>
-          ))}
-        </select>
+        />
         <button type="submit" className="btn btn-primary">
           Filter
         </button>

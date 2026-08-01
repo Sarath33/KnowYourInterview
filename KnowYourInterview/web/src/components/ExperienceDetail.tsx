@@ -8,6 +8,7 @@ import { errorMessage } from "../lib/errors";
 import { OutcomeTag, RemoteTag } from "./tags";
 import { ArrowLeftIcon, LockIcon } from "./icons";
 import { formatPaise, interviewedLabel, levelLine, roundCountLabel, viewCountLabel } from "../lib/format";
+import { roundTypeLabel } from "../lib/roundTypes";
 
 export function ExperienceDetail({
   experienceId,
@@ -106,6 +107,10 @@ export function ExperienceDetail({
         <TeaserWithUnlock
           teaser={view.teaser}
           isAuthenticated={isAuthenticated}
+          // The server rejects an unconfirmed purchase regardless (see
+          // EmailVerificationGuard); this only avoids letting someone open a Razorpay modal
+          // that was always going to fail.
+          emailVerified={user?.emailVerified ?? true}
           purchasing={purchasing}
           onUnlock={unlock}
           onLoginRequired={onLoginRequired}
@@ -121,12 +126,14 @@ export function ExperienceDetail({
 function TeaserWithUnlock({
   teaser,
   isAuthenticated,
+  emailVerified,
   purchasing,
   onUnlock,
   onLoginRequired,
 }: {
   teaser: ExperienceTeaser;
   isAuthenticated: boolean;
+  emailVerified: boolean;
   purchasing: boolean;
   onUnlock: () => void;
   onLoginRequired: () => void;
@@ -156,16 +163,23 @@ function TeaserWithUnlock({
         details.
       </p>
       {isAuthenticated ? (
-        <button
-          type="button"
-          onClick={onUnlock}
-          disabled={purchasing}
-          className="btn btn-primary btn-block"
-          style={{ padding: 13, fontSize: 15, marginTop: 8 }}
-        >
-          {purchasing ? "Opening checkout…" : `Unlock ${formatPaise(teaser.pricePaise)}`}
-          <LockIcon />
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={onUnlock}
+            disabled={purchasing || !emailVerified}
+            className="btn btn-primary btn-block"
+            style={{ padding: 13, fontSize: 15, marginTop: 8 }}
+          >
+            {purchasing ? "Opening checkout…" : `Unlock ${formatPaise(teaser.pricePaise)}`}
+            <LockIcon />
+          </button>
+          {!emailVerified && (
+            <p className="muted" style={{ fontSize: 13, marginTop: 8, marginBottom: 0 }}>
+              Confirm your email address first — see the banner at the top of the page.
+            </p>
+          )}
+        </>
       ) : (
         <p style={{ marginTop: 8 }}>
           <button type="button" className="link-button" onClick={onLoginRequired}>
@@ -287,7 +301,7 @@ function FullExperience({
           {full.rounds.map((round) => (
             <div key={round.id} className="round-card">
               <div className="round-title">
-                Round {round.roundNumber} — {round.roundType}
+                Round {round.roundNumber} — {roundTypeLabel(round.roundType)}
               </div>
               <div className="round-meta">
                 {round.durationMinutes && <span>{round.durationMinutes} min</span>}

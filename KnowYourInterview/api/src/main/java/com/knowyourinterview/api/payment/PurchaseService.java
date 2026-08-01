@@ -12,6 +12,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.knowyourinterview.api.auth.EmailVerificationGuard;
 import com.knowyourinterview.api.common.InvalidStateException;
 import com.knowyourinterview.api.common.NotFoundException;
 import com.knowyourinterview.api.common.UpstreamServiceException;
@@ -36,6 +37,7 @@ public class PurchaseService {
     private final PurchaseRepository purchaseRepository;
     private final EntitlementRepository entitlementRepository;
     private final PurchaseOrderPersister orderPersister;
+    private final EmailVerificationGuard emailVerificationGuard;
     private final String keyId;
     private final String keySecret;
     private final String webhookSecret;
@@ -45,6 +47,7 @@ public class PurchaseService {
             PurchaseRepository purchaseRepository,
             EntitlementRepository entitlementRepository,
             PurchaseOrderPersister orderPersister,
+            EmailVerificationGuard emailVerificationGuard,
             @Value("${app.razorpay.key-id}") String keyId,
             @Value("${app.razorpay.key-secret}") String keySecret,
             @Value("${app.razorpay.webhook-secret}") String webhookSecret) {
@@ -52,6 +55,7 @@ public class PurchaseService {
         this.purchaseRepository = purchaseRepository;
         this.entitlementRepository = entitlementRepository;
         this.orderPersister = orderPersister;
+        this.emailVerificationGuard = emailVerificationGuard;
         this.keyId = keyId;
         this.keySecret = keySecret;
         this.webhookSecret = webhookSecret;
@@ -66,6 +70,10 @@ public class PurchaseService {
      * method wouldn't be proxied).
      */
     public CreateOrderResponse createOrder(UUID userId, UUID experienceId) {
+        // Before anything else, and certainly before opening a Razorpay order: a purchase
+        // with no reachable buyer is one nobody can resolve a refund or dispute with. Cheap
+        // to check, and failing here costs the user nothing beyond a clear message.
+        emailVerificationGuard.requireVerified(userId, "unlocking an experience");
         Experience experience = experienceRepository.findById(experienceId)
                 .orElseThrow(() -> new NotFoundException("Experience not found"));
         if (experience.getStatus() != ExperienceStatus.PUBLISHED) {

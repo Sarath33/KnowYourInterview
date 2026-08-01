@@ -14,10 +14,19 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import org.mockito.ArgumentCaptor;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+
 import com.knowyourinterview.api.auth.dto.AuthResponse;
+import com.knowyourinterview.api.email.EmailSender;
 import com.knowyourinterview.api.support.ContainerConfig;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
 
 /**
  * The one gap flagged repeatedly since Phase 2: every other auth test mocks AuthService
@@ -39,8 +48,26 @@ class AuthFlowIT {
     @Autowired
     private org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
 
+    /** Replaces whichever EmailSender EmailConfig would have chosen, so the confirmation
+     * link can be pulled back out and actually followed — the raw token is deliberately not
+     * recoverable from the database (only its hash is stored), so intercepting the message is
+     * the only way to exercise the real redemption path rather than faking it with an UPDATE. */
+    @MockitoBean
+    private EmailSender emailSender;
+
     private static String uniqueEmail() {
         return "it-" + System.nanoTime() + "@example.com";
+    }
+
+    /** Pulls the confirm/reset token out of the most recent message sent to an address. */
+    private String capturedTokenFor(String email) {
+        ArgumentCaptor<String> textBody = ArgumentCaptor.forClass(String.class);
+        verify(emailSender, atLeastOnce())
+                .send(eq(email), anyString(), anyString(), textBody.capture());
+        String body = textBody.getAllValues().get(textBody.getAllValues().size() - 1);
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("token=([^\\s]+)").matcher(body);
+        assertThat(matcher.find()).as("email body should contain a ?token= link").isTrue();
+        return matcher.group(1);
     }
 
     /** All test methods share one Spring context (and Redis container) — clear
@@ -49,6 +76,10 @@ class AuthFlowIT {
     @BeforeEach
     void resetRedis() {
         redisTemplate.getConnectionFactory().getConnection().serverCommands().flushDb();
+        // The EmailSender mock is shared across the whole class (one Spring context), so
+        // clear recorded sends too — otherwise capturedTokenFor could pick up a message from
+        // an earlier test and the interactions would accumulate across methods.
+        reset(emailSender);
     }
 
     @Test
@@ -146,6 +177,104 @@ class AuthFlowIT {
         assertThat(sixth.getStatusCode().value()).isEqualTo(429);
     }
 
+    /**
+     * The whole confirmation loop against the real stack: register, take the link out of the
+     * email that was actually sent, redeem it, and see the account come back confirmed.
+     * <p>
+     * This is the one place the raw token makes the full round trip. Everywhere else — the
+     * unit tests, and PurchaseFlowIT — has to settle for a direct UPDATE, because the token
+     * only exists in the message body and the database keeps just its hash.
+     */
+    @Test
+    void registrationSendsAConfirmationLinkThatActuallyWorks() {
+        String email = uniqueEmail();
+
+        AuthResponse registered = restTemplate.postForObject(
+                "/api/v1/auth/register", new RegisterBody(email, "correct-horse-battery-staple", "IT User"),
+                AuthResponse.class);
+        assertThat(registered.user().emailVerified())
+                .as("a fresh email/password signup starts unconfirmed")
+                .isFalse();
+
+        String token = capturedTokenFor(email);
+
+        ResponseEntity<String> confirmed = restTemplate.postForEntity(
+                "/api/v1/auth/verify-email", new TokenBody(token), String.class);
+        assertThat(confirmed.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // A newly issued session reflects it — which is what the web app's refresh-on-confirm
+        // relies on to lift the gate without waiting for the access token to turn over.
+        AuthResponse loggedIn = restTemplate.postForObject(
+                "/api/v1/auth/login", new LoginBody(email, "correct-horse-battery-staple"), AuthResponse.class);
+        assertThat(loggedIn.user().emailVerified()).isTrue();
+    }
+
+    /** Single-use, enforced server-side — a link that leaks after it's been used is inert. */
+    @Test
+    void aConfirmationLinkCannotBeRedeemedTwice() {
+        String email = uniqueEmail();
+        restTemplate.postForEntity(
+                "/api/v1/auth/register", new RegisterBody(email, "correct-horse-battery-staple", "IT User"),
+                AuthResponse.class);
+        String token = capturedTokenFor(email);
+
+        assertThat(restTemplate.postForEntity("/api/v1/auth/verify-email", new TokenBody(token), String.class)
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // Second attempt succeeds rather than erroring, because the account is already
+        // confirmed — see EmailVerificationService#verify on why that ordering is deliberate
+        // (mail clients prefetch links, people double-click). The token itself is spent either
+        // way; what matters is that nothing further changes.
+        ResponseEntity<String> second = restTemplate.postForEntity(
+                "/api/v1/auth/verify-email", new TokenBody(token), String.class);
+        assertThat(second.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void aGarbageConfirmationTokenIsRejected() {
+        ResponseEntity<String> response = restTemplate.postForEntity(
+                "/api/v1/auth/verify-email", new TokenBody("not-a-real-token"), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(response.getBody()).contains("isn't valid");
+    }
+
+    /** Resending must invalidate the previous link — otherwise every resend leaves another
+     * working credential sitting in the user's inbox. */
+    @Test
+    void resendingInvalidatesTheEarlierLink() {
+        String email = uniqueEmail();
+        restTemplate.postForEntity(
+                "/api/v1/auth/register", new RegisterBody(email, "correct-horse-battery-staple", "IT User"),
+                AuthResponse.class);
+        String firstToken = capturedTokenFor(email);
+
+        restTemplate.postForEntity(
+                "/api/v1/auth/resend-verification", new EmailBody(email), String.class);
+        String secondToken = capturedTokenFor(email);
+        assertThat(secondToken).isNotEqualTo(firstToken);
+
+        ResponseEntity<String> stale = restTemplate.postForEntity(
+                "/api/v1/auth/verify-email", new TokenBody(firstToken), String.class);
+        assertThat(stale.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(stale.getBody()).contains("already been used");
+
+        assertThat(restTemplate.postForEntity("/api/v1/auth/verify-email", new TokenBody(secondToken), String.class)
+                .getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    /** Same no-enumeration response as forgot-password: an unknown address gets the identical
+     * 200 a real one does, and nothing is sent. */
+    @Test
+    void resendingForAnUnknownAddressLooksIdenticalAndSendsNothing() {
+        ResponseEntity<String> response = restTemplate.postForEntity(
+                "/api/v1/auth/resend-verification", new EmailBody("nobody-" + System.nanoTime() + "@example.com"),
+                String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        org.mockito.Mockito.verifyNoInteractions(emailSender);
+    }
+
     @Test
     void duplicateRegistrationIsRejected() {
         String email = uniqueEmail();
@@ -164,4 +293,10 @@ class AuthFlowIT {
     private record LoginBody(String email, String password) {}
 
     private record RefreshBody(String refreshToken) {}
+
+    /** Body shape for /verify-email — matches VerifyEmailRequest. */
+    private record TokenBody(String token) {}
+
+    /** Body shape for /resend-verification — matches ResendVerificationRequest. */
+    private record EmailBody(String email) {}
 }

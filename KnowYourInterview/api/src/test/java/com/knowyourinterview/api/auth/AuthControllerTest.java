@@ -37,6 +37,10 @@ class AuthControllerTest {
     @MockitoBean
     private AuthService authService;
 
+    // AuthController also owns the two email-confirmation routes now.
+    @MockitoBean
+    private EmailVerificationService emailVerificationService;
+
     // SecurityConfig now wires RateLimitingFilter, which needs this bean to exist —
     // unused directly by these tests otherwise.
     @MockitoBean
@@ -50,7 +54,8 @@ class AuthControllerTest {
     }
 
     private AuthResponse sampleAuthResponse() {
-        UserResponse user = new UserResponse(UUID.randomUUID(), "jane@example.com", "Jane", false, Instant.now());
+        UserResponse user = new UserResponse(
+                UUID.randomUUID(), "jane@example.com", "Jane", false, false, Instant.now());
         return new AuthResponse("access-token", "refresh-token", user);
     }
 

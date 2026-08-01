@@ -36,6 +36,37 @@ spring:
       max-file-size: 10MB
       max-request-size: 10MB
 
+  # Transactional email over SMTP — works with Postmark, SendGrid, Resend, Mailgun or any
+  # other provider, so switching vendors is these values and nothing else.
+  #
+  # Leave MAIL_HOST unset (the default) and Spring Boot creates no JavaMailSender at all,
+  # which EmailConfig detects and falls back to logging the message instead of sending it.
+  # That's the local-dev path: confirmation and password-reset links appear in the console.
+  #
+  # To actually send: set MAIL_HOST/MAIL_USERNAME/MAIL_PASSWORD (and MAIL_FROM_ADDRESS under
+  # app.email below) to your provider's SMTP credentials. Port 587 with STARTTLS is the
+  # near-universal default; 465 with implicit TLS also exists if a provider prefers it.
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            # Fail rather than silently falling back to an unencrypted connection if the
+            # server doesn't offer STARTTLS — these messages carry account-recovery links.
+            required: true
+        # Don't let a hung mail server hold a request thread open indefinitely. Sending is
+        # synchronous within the registration/forgot-password call, so these bound the worst
+        # case a user can experience.
+        smtp.connectiontimeout: 5000
+        smtp.timeout: 5000
+        smtp.writetimeout: 5000
+
 server:
   port: 8080
 
@@ -67,6 +98,11 @@ management:
       enabled: true
 
 app:
+  # Where the web app is served from — used to build user-facing links that live in the
+  # frontend's routes, currently just the password-reset link (AuthService#forgotPassword).
+  # Defaults to the Vite dev server; set WEB_BASE_URL to the deployed web origin in any
+  # other environment, or reset links will point people at their own localhost.
+  web-base-url: ${WEB_BASE_URL:http://localhost:5173}
   jwt:
     # Local-dev-only default. Override with the JWT_SECRET env var for any shared/deployed environment —
     # HMAC-SHA256 needs >= 256 bits; this is a placeholder, not a real secret.
@@ -75,6 +111,17 @@ app:
     refresh-token-ttl-days: 30
   password-reset:
     token-ttl-minutes: 60
+  email-verification:
+    # Generous compared to the password-reset window above, on purpose: a reset is something
+    # you asked for and are waiting on, while a confirmation email competes with everything
+    # else in an inbox. Expiring it in an hour would mostly generate resends.
+    token-ttl-hours: 24
+  email:
+    # The From: on transactional mail. Must be an address at a domain the SMTP provider has
+    # verified for sending, or messages will be rejected or land in spam regardless of the
+    # rest of the configuration being right.
+    from-address: ${MAIL_FROM_ADDRESS:no-reply@knowyourinterview.local}
+    from-name: ${MAIL_FROM_NAME:Know Your Interview}
   storage:
     # Local-disk proof storage for dev. Swap for an S3-backed implementation of
     # ProofStorageService in Phase 6 without touching callers.
@@ -83,6 +130,16 @@ app:
     # Upper bound on the page size a Browse request can ask for — clamps a caller passing
     # ?size=5000 down to something sane. Wired into ExperienceService.browsePublished.
     max-page-size: 100
+  rate-limit:
+    # Does a trusted proxy sit in front of this app and set X-Forwarded-For? Off by default,
+    # which is right for local dev and for anything directly internet-facing (the header is
+    # attacker-controlled there, so trusting it would defeat the limiter entirely).
+    #
+    # Set TRUST_FORWARDED_FOR=true in any deployment behind a load balancer/CDN — Railway
+    # included. Without it, every request looks like it comes from the proxy's single IP, so
+    # the per-IP limits in RateLimitingFilter become global: 10 logins/minute shared across
+    # the entire user base rather than per person.
+    trust-forwarded-for: ${TRUST_FORWARDED_FOR:false}
   pricing:
     # Platform-fixed viewer unlock price (paise), applied to every experience at
     # creation time — contributors don't set their own price. Tiering by company/role

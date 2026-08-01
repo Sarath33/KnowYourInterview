@@ -13,6 +13,7 @@ export function ConfirmDialog({
   confirmLabel,
   busyLabel,
   confirming = false,
+  tone = "danger",
   onConfirm,
   onCancel,
 }: {
@@ -21,6 +22,12 @@ export function ConfirmDialog({
   confirmLabel: string;
   busyLabel?: string;
   confirming?: boolean;
+  /** "danger" (default) for destructive actions — delete, remove. "primary" for
+   * consequential-but-constructive ones, like an admin approving and publishing a
+   * submission: it's worth a confirmation step (it goes live, sets a price and creates a
+   * payout liability, and there's no one-click undo) but styling it as a destructive
+   * action would read wrong. */
+  tone?: "danger" | "primary";
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -89,7 +96,7 @@ export function ConfirmDialog({
             type="button"
             onClick={onConfirm}
             disabled={confirming}
-            className="btn btn-outline btn-outline-danger"
+            className={tone === "danger" ? "btn btn-outline btn-outline-danger" : "btn btn-primary"}
           >
             {confirming ? busyLabel ?? "Working…" : confirmLabel}
           </button>

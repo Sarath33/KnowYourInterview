@@ -25,4 +25,12 @@ public interface ExperienceViewRepository extends JpaRepository<ExperienceView, 
             ON CONFLICT (experience_id, viewer_id) DO NOTHING
             """, nativeQuery = true)
     int recordView(@Param("id") UUID id, @Param("experienceId") UUID experienceId, @Param("viewerId") UUID viewerId);
+
+    /** Cleanup for ExperienceService#deleteExperience. experience_views' foreign key to
+     * experiences deliberately doesn't cascade (see V10), so these rows have to be removed
+     * explicitly alongside rounds/proofs/review logs/edit snapshots — otherwise deleting an
+     * experience that anyone ever viewed fails on the constraint and surfaces as an opaque
+     * 409. Reachable in practice for a free or reference submission (no entitlement and no
+     * payout to block the delete earlier) that was published, viewed, then unpublished. */
+    void deleteByExperienceId(UUID experienceId);
 }

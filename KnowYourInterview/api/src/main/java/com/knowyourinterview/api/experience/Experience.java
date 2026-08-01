@@ -94,10 +94,13 @@ public class Experience {
     @Column(name = "confidential_note", columnDefinition = "text")
     private String confidentialNote;
 
-    // Raw hit counter, not deduped by viewer/session — every load of a PUBLISHED
-    // experience's detail page counts, including repeat views by the same person. See
-    // ExperienceService#getPublicView, the only writer of this field.
-    @Column(name = "view_count", nullable = false)
+    // One per signed-in viewer, not per page load — a repeat visit by the same person
+    // doesn't move it, and a guest's visit isn't counted at all (see experience_views /
+    // ExperienceView, added in V10, which is what de-dupes it). Read-only from this entity's
+    // point of view: the counter is written exclusively by
+    // ExperienceRepository#incrementViewCount, an atomic UPDATE that deliberately skips the
+    // @Version column below, so a view can never collide with a concurrent content edit.
+    @Column(name = "view_count", nullable = false, updatable = false)
     private long viewCount;
 
     @Column(name = "created_at", nullable = false)
@@ -244,12 +247,6 @@ public class Experience {
         this.status = ExperienceStatus.CORRECTION_REQUESTED;
         this.correctionNotes = notes;
         this.updatedAt = Instant.now();
-    }
-
-    /** Raw hit counter — see the field's Javadoc. The only writer is
-     * ExperienceService#getPublicView. */
-    public void incrementViewCount() {
-        this.viewCount++;
     }
 
     public void publish() {

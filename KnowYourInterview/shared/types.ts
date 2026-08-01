@@ -13,6 +13,13 @@ export interface User {
   email: string;
   displayName: string;
   isAdmin: boolean;
+  /** Whether this address has been confirmed. False for a fresh email/password signup until
+   * they click the link; true from the start for Google sign-ins (Google already verified
+   * it) and for every account that predates the feature. Drives the confirm-your-email
+   * banner and the disabled submit/unlock buttons — but it's only an affordance: the server
+   * enforces the same rule independently, so a stale value here can't unlock anything. It
+   * refreshes whenever a new session is issued, which is why confirming triggers one. */
+  emailVerified: boolean;
   createdAt: ISODateTime;
 }
 
@@ -68,9 +75,9 @@ export interface ExperienceTeaser {
   isFree?: boolean;
   sourceUrl?: string;
   sourceName?: string;
-  /** Raw hit counter — how many times this experience's detail page has been loaded
-   * while published. Not deduped by viewer/session. Public, shown on Browse cards and
-   * the detail page. */
+  /** How many distinct signed-in viewers have opened this experience's detail page while
+   * published — one per person, not per page load, and guest visits aren't counted at all.
+   * Public, shown on Browse cards and the detail page. */
   viewCount: number;
 }
 
@@ -308,9 +315,31 @@ export interface ForgotPasswordRequest {
   email: string;
 }
 
+/** The raw token from a confirmation link's ?token= query param. */
+export interface VerifyEmailRequest {
+  token: string;
+}
+
+/** Addressed by email rather than by session, so the same endpoint serves both the
+ * signed-in "resend" banner and someone who never finished signing up. The response is
+ * identical for any address — don't read it as confirmation that an account exists. */
+export interface ResendVerificationRequest {
+  email: string;
+}
+
 export interface ResetPasswordRequest {
+  /** The raw token from the reset link's ?token= query param. Hashed server-side and
+   * matched against password_reset_tokens; single-use and expires after an hour. */
   token: string;
   newPassword: string;
+}
+
+/** Envelope for endpoints that return only a human-readable status message —
+ * forgot-password, reset-password, bootstrap-admin. Mirrors the backend's MessageResponse.
+ * The forgot-password message is deliberately the same whether or not the email is
+ * registered, so don't treat it as confirmation that an account exists. */
+export interface MessageResponse {
+  message: string;
 }
 
 export interface ApiErrorBody {

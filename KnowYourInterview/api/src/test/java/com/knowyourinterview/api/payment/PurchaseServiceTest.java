@@ -11,6 +11,8 @@ import org.mockito.MockedStatic;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.knowyourinterview.api.auth.EmailNotVerifiedException;
+import com.knowyourinterview.api.auth.EmailVerificationGuard;
 import com.knowyourinterview.api.common.InvalidStateException;
 import com.knowyourinterview.api.common.NotFoundException;
 import com.knowyourinterview.api.experience.Experience;
@@ -49,6 +51,9 @@ class PurchaseServiceTest {
     private EntitlementRepository entitlementRepository;
     @Mock
     private PurchaseOrderPersister orderPersister;
+    /** Does nothing by default, so every other test here runs as a confirmed buyer. */
+    @Mock
+    private EmailVerificationGuard emailVerificationGuard;
 
     private PurchaseService service;
 
@@ -57,7 +62,8 @@ class PurchaseServiceTest {
         // Blank keys are intentional: it lets createOrder's guard-clause tests run without
         // ever reaching the real Razorpay network call (see class Javadoc above).
         service = new PurchaseService(
-                experienceRepository, purchaseRepository, entitlementRepository, orderPersister, "", "", "whsec_test");
+                experienceRepository, purchaseRepository, entitlementRepository, orderPersister,
+                emailVerificationGuard, "", "", "whsec_test");
     }
 
     private Experience publishedExperience() {
@@ -71,6 +77,40 @@ class PurchaseServiceTest {
     }
 
     // --- createOrder guard clauses ---
+
+    /** Checked before anything else, including the experience lookup — a purchase with no
+     * reachable buyer can't be refunded or disputed, and there's no point reaching out to
+     * Razorpay for an order that mustn't complete. */
+    @Test
+    void createOrderIsBlockedForAnUnconfirmedEmailAddress() {
+        UUID buyerId = UUID.randomUUID();
+        org.mockito.Mockito.doThrow(
+                        new EmailNotVerifiedException("Confirm your email address before unlocking an experience."))
+                .when(emailVerificationGuard).requireVerified(org.mockito.ArgumentMatchers.eq(buyerId), any());
+
+        assertThatThrownBy(() -> service.createOrder(buyerId, UUID.randomUUID()))
+                .isInstanceOf(EmailNotVerifiedException.class);
+
+        verify(experienceRepository, never()).findById(any());
+    }
+
+    /** Confirming a payment that already went through isn't gated: the money has moved, and
+     * refusing to record the entitlement would leave someone charged with nothing to show
+     * for it. The gate belongs at the start of checkout, not after it. */
+    @Test
+    void confirmPaymentIsNotGatedOnEmailVerification() {
+        Purchase purchase = new Purchase(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), 19900, "order_abc");
+        when(purchaseRepository.findByRazorpayOrderId("order_abc")).thenReturn(Optional.of(purchase));
+
+        // Signature verification fails here (blank secret), which is fine — the point is that
+        // it got past the guard to reach that check at all.
+        assertThatThrownBy(() -> service.confirmPayment(
+                        purchase.getUserId(), new ConfirmPaymentRequest("order_abc", "pay_abc", "sig")))
+                .isInstanceOf(InvalidStateException.class);
+
+        verify(emailVerificationGuard, never()).requireVerified(any(), any());
+    }
 
     @Test
     void createOrderRejectsUnknownExperience() {
@@ -253,7 +293,8 @@ class PurchaseServiceTest {
     @Test
     void verifyWebhookSignatureRejectsWhenSecretNotConfigured() {
         PurchaseService noSecretService = new PurchaseService(
-                experienceRepository, purchaseRepository, entitlementRepository, orderPersister, "", "", "");
+                experienceRepository, purchaseRepository, entitlementRepository, orderPersister,
+                emailVerificationGuard, "", "", "");
 
         assertThat(noSecretService.verifyWebhookSignature("{}", "sig")).isFalse();
     }

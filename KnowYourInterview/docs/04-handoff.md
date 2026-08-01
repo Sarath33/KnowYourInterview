@@ -154,6 +154,25 @@ UPDATE users SET is_admin = true WHERE email = 'you@example.com';
 
 The app is live on Railway — web and api are both deployed, connected to real Postgres/Redis, and smoke-tested. Full details (URLs, env vars, volumes, gotchas hit during setup, known gaps) are in `docs/06-deployment.md`. Razorpay isn't configured yet in the deployed environment, so the unlock-purchase flow will error until keys are added there.
 
+## Application review + fix pass (2026-08-01)
+
+A full end-to-end read of `api/`, `web/`, `shared/`, `docs/` and the migrations, followed by
+fixing what it found. Two documents:
+
+- **`07-application-review.md`** — the findings: seven bugs (including one that made a class of
+  experiences undeletable, one that could 409 an ordinary page load, and one that reduced the
+  deployed rate limiter to a single global bucket), 1,179 lines of frontend code that was never
+  bundled, plus product gaps, security notes, code-health observations and documentation drift.
+- **`08-fixes-2026-08-01.md`** — what was changed in response, what to verify locally, and the
+  one deployment action it requires (`TRUST_FORWARDED_FOR=true` on Railway).
+
+The headline additions for anyone picking this up: password reset now has a UI (the endpoints
+had none, so a forgotten password was an unrecoverable account), the admin review queue shows
+the rounds it's asking you to approve, and approving asks for confirmation first.
+
+Neither the backend changes nor the frontend tests have been run — same JDK/Docker sandbox
+limitation as previous phases. `./mvnw verify` and `npm test` locally are the first things to do.
+
 ## Reference docs
 
 - `01-build-roadmap.md` — full prerequisites + 8-phase roadmap.
@@ -161,3 +180,5 @@ The app is live on Railway — web and api are both deployed, connected to real 
 - `03-setup-guide.md` — fresh-machine setup + first run.
 - `04-handoff.md` — this file.
 - `06-deployment.md` — live Railway deployment: URLs, env vars, volumes, gotchas, known gaps.
+- `07-application-review.md` — end-to-end review (2026-08-01): bugs, gaps, code health, doc drift.
+- `08-fixes-2026-08-01.md` — what that review's §1–§2 items were fixed with, and how to verify.

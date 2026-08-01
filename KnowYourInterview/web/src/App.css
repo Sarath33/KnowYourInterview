@@ -25,6 +25,60 @@
   color: var(--danger-text);
 }
 
+/* ---------- Footer ---------- */
+/* .app-main has flex: 1 inside .app-shell's flex column, so this sits pinned to the
+ * bottom of the viewport on short pages and right after the content on long ones,
+ * without needing its own margin-top: auto. */
+
+.app-footer {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 20px 32px;
+}
+
+.app-footer-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+}
+
+.app-footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-secondary-2);
+  flex-shrink: 0;
+}
+
+.app-footer-text {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.app-footer-text a {
+  font-weight: 600;
+}
+
+.app-footer-copyright {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+@media (max-width: 680px) {
+  .app-footer-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 /* ---------- Nav ---------- */
 
 .nav-bar {
@@ -274,6 +328,13 @@
   color: var(--text-secondary-2);
 }
 
+/* Sits under an input to state a constraint before it's violated (e.g. minimum password
+   length) rather than only reporting it as an error afterwards. */
+.field-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .text-input,
 .textarea,
 .select {
@@ -316,6 +377,115 @@
 
 .select:hover {
   border-color: var(--accent);
+}
+
+/* ---------- Dropdown menu (branded <select> replacement) ---------- */
+/* See DropdownMenu.tsx's Javadoc-style comment — .select's custom chevron only reaches
+ * the closed-state box; this owns both states so the open list can be styled too. */
+
+.dropdown-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-menu-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-width: 190px;
+  padding: 10px 12px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-input);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dropdown-menu-trigger:hover {
+  border-color: var(--accent);
+}
+
+.dropdown-menu-trigger:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.dropdown-menu-trigger-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary-2);
+}
+
+.dropdown-menu-trigger svg:last-child {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.dropdown-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 100%;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-dialog);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dropdown-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary-2);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dropdown-menu-item svg:first-child {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.dropdown-menu-item:hover {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+.dropdown-menu-item:hover svg:first-child {
+  color: var(--accent);
+}
+
+.dropdown-menu-item.is-active {
+  color: var(--accent);
+  font-weight: 700;
+}
+.dropdown-menu-item.is-active svg:first-child {
+  color: var(--accent);
+}
+
+.dropdown-menu-item-label {
+  flex: 1;
 }
 
 .checkbox-field {
@@ -580,6 +750,69 @@
   .submission-layout {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---------- Auth / account cards ---------- */
+
+/* The shell shared by the login/register card and the password-recovery screens, so they
+   read as one flow. Previously AuthForms hard-coded these as inline styles; the recovery
+   screens use the class instead. */
+.auth-card-wrap {
+  max-width: 420px;
+  margin: 32px auto 0;
+}
+
+.auth-card-title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 26px;
+  margin-bottom: 20px;
+}
+
+.auth-card-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0 0 18px;
+}
+
+/* Secondary to .auth-card-text — operational caveats (e.g. "email delivery isn't
+   configured on this deployment") rather than instructions the user acts on. */
+.auth-card-note {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  background: var(--neutral-bg);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 0 0 18px;
+}
+
+/* ---------- Email confirmation banner ---------- */
+
+/* Warning-toned rather than error-toned: nothing has gone wrong, there's just an action
+   outstanding. Deliberately not dismissible — it's the only explanation for why the submit
+   and unlock buttons are disabled. */
+.verify-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.verify-banner-error {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--danger-text);
 }
 
 /* ---------- Misc utility ---------- */

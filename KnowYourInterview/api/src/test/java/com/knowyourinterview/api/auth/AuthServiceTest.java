@@ -18,6 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import com.knowyourinterview.api.auth.dto.AuthResponse;
 import com.knowyourinterview.api.common.NotFoundException;
+import com.knowyourinterview.api.email.EmailSender;
 import com.knowyourinterview.api.security.JwtService;
 import com.knowyourinterview.api.user.PasswordResetToken;
 import com.knowyourinterview.api.user.PasswordResetTokenRepository;
@@ -44,6 +45,8 @@ class AuthServiceTest {
 
     private static final long PASSWORD_RESET_TTL_MINUTES = 30;
     private static final String ADMIN_BOOTSTRAP_SECRET = "test-bootstrap-secret";
+    // The origin the emailed password-reset link is built against — see AuthService#forgotPassword.
+    private static final String WEB_BASE_URL = "http://localhost:5173";
 
     @Mock
     private UserRepository userRepository;
@@ -59,6 +62,10 @@ class AuthServiceTest {
     private ValueOperations<String, String> valueOperations;
     @Mock
     private GoogleIdTokenVerifierPort googleIdTokenVerifierPort;
+    @Mock
+    private EmailVerificationService emailVerificationService;
+    @Mock
+    private EmailSender emailSender;
 
     private AuthService authService;
 
@@ -72,7 +79,10 @@ class AuthServiceTest {
                 redisTemplate,
                 PASSWORD_RESET_TTL_MINUTES,
                 googleIdTokenVerifierPort,
-                ADMIN_BOOTSTRAP_SECRET);
+                emailVerificationService,
+                emailSender,
+                ADMIN_BOOTSTRAP_SECRET,
+                WEB_BASE_URL);
     }
 
     private void stubTokenIssuance() {
@@ -269,6 +279,9 @@ class AuthServiceTest {
         authService.forgotPassword("ghost@example.com");
 
         verify(passwordResetTokenRepository, never()).save(any());
+        // The absence of an email is the point: sending to an unknown address would be both
+        // useless and a way to use the app as a mailer.
+        verify(emailSender, never()).send(any(), any(), any(), any());
     }
 
     @Test
@@ -282,6 +295,73 @@ class AuthServiceTest {
         verify(passwordResetTokenRepository).save(captor.capture());
         assertThat(captor.getValue().getUserId()).isEqualTo(user.getId());
         assertThat(captor.getValue().isExpired()).isFalse();
+    }
+
+    /** The link has to point at the web app's own /reset-password route, against the
+     * configured origin — a link built against the API's host, or with a bare token, is
+     * unusable by the person who receives it. */
+    @Test
+    void forgotPasswordEmailsALinkToTheWebAppsResetRoute() {
+        User user = new User(UUID.randomUUID(), "jane@example.com", "hashed-pw", "Jane");
+        when(userRepository.findByEmailIgnoreCase("jane@example.com")).thenReturn(Optional.of(user));
+
+        authService.forgotPassword("jane@example.com");
+
+        ArgumentCaptor<String> textBody = ArgumentCaptor.forClass(String.class);
+        verify(emailSender).send(eq("jane@example.com"), anyString(), anyString(), textBody.capture());
+        assertThat(textBody.getValue()).contains(WEB_BASE_URL + "/reset-password?token=");
+    }
+
+    /** Registration hands the account straight to the verification service. Sending is its
+     * job, not AuthService's — this only checks the handoff happens, and for the user that
+     * was actually created. */
+    @Test
+    void registerTriggersAConfirmationEmail() {
+        stubTokenIssuance();
+        when(userRepository.existsByEmailIgnoreCase("jane@example.com")).thenReturn(false);
+        when(passwordEncoder.encode("password123")).thenReturn("hashed-pw");
+
+        authService.register("jane@example.com", "password123", "Jane");
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(emailVerificationService).issueAndSend(captor.capture());
+        assertThat(captor.getValue().getEmail()).isEqualTo("jane@example.com");
+        // New accounts start unconfirmed — that's what the email is for.
+        assertThat(captor.getValue().isEmailVerified()).isFalse();
+    }
+
+    /** Google has already proved control of the address, so a confirmation email would be
+     * asking the user to prove something twice. */
+    @Test
+    void googleSignupIsAlreadyVerifiedAndSendsNoConfirmationEmail() {
+        stubTokenIssuance();
+        when(googleIdTokenVerifierPort.verify("id-token"))
+                .thenReturn(new GoogleUserInfo("google-sub-1", "jane@example.com", "Jane"));
+        when(userRepository.findByGoogleSub("google-sub-1")).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase("jane@example.com")).thenReturn(Optional.empty());
+
+        AuthResponse response = authService.googleLogin("id-token");
+
+        assertThat(response.user().emailVerified()).isTrue();
+        verify(emailVerificationService, never()).issueAndSend(any());
+    }
+
+    /** Signing in with Google against an existing email/password account proves the same
+     * thing a confirmation link does, so it clears a pending confirmation rather than
+     * leaving the account stuck behind one. */
+    @Test
+    void linkingGoogleToAnExistingAccountConfirmsItsEmail() {
+        stubTokenIssuance();
+        User existing = new User(UUID.randomUUID(), "jane@example.com", "hashed-pw", "Jane");
+        assertThat(existing.isEmailVerified()).isFalse();
+        when(googleIdTokenVerifierPort.verify("id-token"))
+                .thenReturn(new GoogleUserInfo("google-sub-1", "jane@example.com", "Jane"));
+        when(userRepository.findByGoogleSub("google-sub-1")).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase("jane@example.com")).thenReturn(Optional.of(existing));
+
+        authService.googleLogin("id-token");
+
+        assertThat(existing.isEmailVerified()).isTrue();
     }
 
     @Test
@@ -376,7 +456,10 @@ class AuthServiceTest {
                 redisTemplate,
                 PASSWORD_RESET_TTL_MINUTES,
                 googleIdTokenVerifierPort,
-                ""); // blank = disabled, same graceful-degradation pattern as Google/Razorpay/Sentry
+                emailVerificationService,
+                emailSender,
+                "", // blank = disabled, same graceful-degradation pattern as Google/Razorpay/Sentry
+                WEB_BASE_URL);
 
         assertThatThrownBy(() -> noSecretConfigured.bootstrapAdmin("jane@example.com", "anything"))
                 .isInstanceOf(AdminBootstrapNotConfiguredException.class);

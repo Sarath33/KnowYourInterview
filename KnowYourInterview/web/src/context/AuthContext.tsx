@@ -12,6 +12,12 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   googleLogin: (idToken: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Pulls a fresh session (and therefore a fresh `user`) from the server. Used after
+   * confirming an email address, where the change that matters — `emailVerified` — lives on
+   * the user object and would otherwise stay stale until the access token happened to expire.
+   * No-ops when signed out, and swallows failures: this is a nicety on top of an action that
+   * already succeeded server-side, so it must never surface as an error for it. */
+  refreshSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -114,6 +120,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [applyTokens],
   );
 
+  const refreshSession = useCallback(async () => {
+    const currentRefreshToken = refreshTokenRef.current;
+    if (!currentRefreshToken) return;
+    try {
+      applyTokens(await api.refreshTokens(currentRefreshToken));
+    } catch {
+      // Refresh tokens are single-use and rotate, so a concurrent refresh elsewhere can
+      // legitimately lose this race. Not worth surfacing — the stale `user` corrects itself
+      // on the next successful refresh, and the server-side gate doesn't depend on it.
+    }
+  }, [applyTokens]);
+
   const logout = useCallback(async () => {
     if (refreshToken) {
       try {
@@ -126,8 +144,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshToken, clear]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, accessToken, isAuthenticated: !!user, register, login, googleLogin, logout }),
-    [user, accessToken, register, login, googleLogin, logout],
+    () => ({
+      user,
+      accessToken,
+      isAuthenticated: !!user,
+      register,
+      login,
+      googleLogin,
+      logout,
+      refreshSession,
+    }),
+    [user, accessToken, register, login, googleLogin, logout, refreshSession],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

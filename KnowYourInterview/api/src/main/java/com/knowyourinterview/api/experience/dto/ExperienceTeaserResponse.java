@@ -32,9 +32,10 @@ public record ExperienceTeaserResponse(
         boolean isFree,
         String sourceUrl,
         String sourceName,
-        // Raw hit counter — how many times this experience's detail page has been
-        // loaded while PUBLISHED. Public, shown on both the Browse card and the detail
-        // page. See Experience#incrementViewCount.
+        // How many distinct signed-in viewers have opened this experience's detail page
+        // while PUBLISHED — one per person, not per page load, and guests aren't counted.
+        // Public, shown on both the Browse card and the detail page. See
+        // ExperienceRepository#incrementViewCount.
         long viewCount) {
 
     public static ExperienceTeaserResponse from(Experience e, long roundCount, boolean unlocked) {

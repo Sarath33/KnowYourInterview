@@ -5,6 +5,8 @@ import type { HealthResponse } from "../../shared/types";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { RouterProvider, useRouter } from "./lib/router";
 import { AuthForms } from "./components/AuthForms";
+import { RequestPasswordReset, ResetPassword } from "./components/PasswordReset";
+import { ConfirmEmail, UnverifiedEmailBanner } from "./components/ConfirmEmail";
 import { BrowseExperiences } from "./components/BrowseExperiences";
 import { SubmissionWorkspace } from "./components/SubmissionWorkspace";
 import { AdminReviewQueue } from "./components/AdminReviewQueue";
@@ -41,6 +43,9 @@ function HealthBanner() {
 // needing to inspect browser history depth.
 type Route =
   | { name: "login" }
+  | { name: "forgotPassword" }
+  | { name: "resetPassword" }
+  | { name: "confirmEmail" }
   | { name: "browse"; experienceId: string | null }
   | { name: "library"; experienceId: string | null }
   | { name: "submissions" }
@@ -52,6 +57,16 @@ type Route =
 function parseRoute(pathname: string): Route {
   if (pathname === "/") return { name: "redirect", to: "" };
   if (pathname === "/login") return { name: "login" };
+  if (pathname === "/forgot-password") return { name: "forgotPassword" };
+  // The path AuthService#forgotPassword's generated link points at. Deliberately reachable
+  // while signed out and — unlike /login — not bounced away for a signed-in user either:
+  // someone who's still logged in on this device is exactly who might be resetting a
+  // password they no longer remember.
+  if (pathname === "/reset-password") return { name: "resetPassword" };
+  // Where EmailVerificationService's confirmation link points. Public and not redirected for
+  // a signed-in user either — someone can easily be logged in on their laptop while opening
+  // the email on their phone, or vice versa, and either device must be able to redeem it.
+  if (pathname === "/confirm-email") return { name: "confirmEmail" };
   const browseMatch = pathname.match(/^\/browse(?:\/([^/]+))?\/?$/);
   if (browseMatch) return { name: "browse", experienceId: browseMatch[1] ?? null };
   const libraryMatch = pathname.match(/^\/library(?:\/([^/]+))?\/?$/);
@@ -100,7 +115,7 @@ function RequireAdmin({ children }: { children: ReactNode }) {
 
 function AppContent() {
   const { user, isAuthenticated, logout } = useAuth();
-  const { pathname, navigate, goBack } = useRouter();
+  const { pathname, search, navigate, goBack } = useRouter();
   const route = parseRoute(pathname);
 
   const handleLogout = async () => {
@@ -118,7 +133,30 @@ function AppContent() {
       case "redirect":
         return <Redirect to={route.to || (isAuthenticated ? "/browse" : "/login")} />;
       case "login":
-        return isAuthenticated ? <Redirect to="/browse" /> : <AuthForms onGuestBrowse={() => navigate("/browse")} />;
+        return isAuthenticated ? (
+          <Redirect to="/browse" />
+        ) : (
+          <AuthForms
+            onGuestBrowse={() => navigate("/browse")}
+            onForgotPassword={() => navigate("/forgot-password")}
+          />
+        );
+      case "forgotPassword":
+        return <RequestPasswordReset onBackToLogin={() => navigate("/login")} />;
+      case "resetPassword":
+        return (
+          <ResetPassword
+            token={new URLSearchParams(search).get("token")}
+            onDone={() => navigate("/login")}
+          />
+        );
+      case "confirmEmail":
+        return (
+          <ConfirmEmail
+            token={new URLSearchParams(search).get("token")}
+            onContinue={() => navigate(isAuthenticated ? "/browse" : "/login")}
+          />
+        );
       case "browse":
         return route.experienceId ? (
           <ExperienceDetail
@@ -204,8 +242,28 @@ function AppContent() {
 
       <main className="app-main">
         <HealthBanner />
+        {/* Hidden on the confirm screen itself — telling someone to confirm their email on
+            the page that's actively confirming it would be nonsense, and the banner's own
+            "resend" would compete with the link they just clicked. */}
+        {isAuthenticated && user && !user.emailVerified && route.name !== "confirmEmail" && (
+          <UnverifiedEmailBanner email={user.email} />
+        )}
         {renderRoute()}
       </main>
+
+      <footer className="app-footer">
+        <div className="app-footer-inner">
+          <span className="app-footer-brand">
+            <LogoMark size={18} />
+            Know Your Interview
+          </span>
+          <span className="app-footer-text">
+            Questions, feedback, or need a hand with something? Reach out at{" "}
+            <a href="mailto:knowyourinterview@gmail.com">knowyourinterview@gmail.com</a>
+          </span>
+          <span className="app-footer-copyright">© {new Date().getFullYear()} Know Your Interview</span>
+        </div>
+      </footer>
     </div>
   );
 }

@@ -4,7 +4,13 @@ import { useAuth } from "../context/AuthContext";
 import { errorMessage } from "../lib/errors";
 import { GoogleSignInButton } from "./GoogleSignInButton";
 
-export function AuthForms({ onGuestBrowse }: { onGuestBrowse: () => void }) {
+export function AuthForms({
+  onGuestBrowse,
+  onForgotPassword,
+}: {
+  onGuestBrowse: () => void;
+  onForgotPassword: () => void;
+}) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const { login, register, googleLogin } = useAuth();
   const [googleError, setGoogleError] = useState<string | null>(null);
@@ -153,6 +159,18 @@ export function AuthForms({ onGuestBrowse }: { onGuestBrowse: () => void }) {
           <button type="submit" disabled={submitting} className="btn btn-primary btn-block">
             {submitting ? "Please wait…" : mode === "login" ? "Log in" : "Create account"}
           </button>
+          {/* Only on the login tab — offering account recovery mid-registration would be
+              noise, since there's no account to recover yet. */}
+          {mode === "login" && (
+            <button
+              type="button"
+              onClick={onForgotPassword}
+              className="btn-ghost"
+              style={{ alignSelf: "center", fontSize: 13 }}
+            >
+              Forgot your password?
+            </button>
+          )}
         </form>
 
         <div className="divider" />

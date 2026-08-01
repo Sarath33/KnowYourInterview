@@ -2,11 +2,8 @@ package com.knowyourinterview.api.auth;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -21,6 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 import com.knowyourinterview.api.auth.dto.AuthResponse;
 import com.knowyourinterview.api.auth.dto.UserResponse;
 import com.knowyourinterview.api.common.NotFoundException;
+import com.knowyourinterview.api.common.SecureTokens;
+import com.knowyourinterview.api.email.AuthEmails;
+import com.knowyourinterview.api.email.EmailSender;
 import com.knowyourinterview.api.security.JwtService;
 import com.knowyourinterview.api.user.PasswordResetToken;
 import com.knowyourinterview.api.user.PasswordResetTokenRepository;
@@ -32,7 +32,6 @@ public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
     private static final String REFRESH_KEY_PREFIX = "refresh:";
-    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final UserRepository userRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
@@ -41,7 +40,10 @@ public class AuthService {
     private final StringRedisTemplate redisTemplate;
     private final Duration passwordResetTtl;
     private final GoogleIdTokenVerifierPort googleIdTokenVerifierPort;
+    private final EmailVerificationService emailVerificationService;
+    private final EmailSender emailSender;
     private final String adminBootstrapSecret;
+    private final String webBaseUrl;
 
     public AuthService(
             UserRepository userRepository,
@@ -51,7 +53,10 @@ public class AuthService {
             StringRedisTemplate redisTemplate,
             @Value("${app.password-reset.token-ttl-minutes}") long passwordResetTtlMinutes,
             GoogleIdTokenVerifierPort googleIdTokenVerifierPort,
-            @Value("${app.admin-bootstrap.secret:}") String adminBootstrapSecret) {
+            EmailVerificationService emailVerificationService,
+            EmailSender emailSender,
+            @Value("${app.admin-bootstrap.secret:}") String adminBootstrapSecret,
+            @Value("${app.web-base-url:http://localhost:5173}") String webBaseUrl) {
         this.userRepository = userRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.passwordEncoder = passwordEncoder;
@@ -59,9 +64,25 @@ public class AuthService {
         this.redisTemplate = redisTemplate;
         this.passwordResetTtl = Duration.ofMinutes(passwordResetTtlMinutes);
         this.googleIdTokenVerifierPort = googleIdTokenVerifierPort;
+        this.emailVerificationService = emailVerificationService;
+        this.emailSender = emailSender;
         this.adminBootstrapSecret = adminBootstrapSecret;
+        // Trailing slash trimmed so the link built in forgotPassword can always append
+        // "/reset-password?token=…" without producing a doubled slash.
+        this.webBaseUrl = webBaseUrl.endsWith("/") ? webBaseUrl.substring(0, webBaseUrl.length() - 1) : webBaseUrl;
     }
 
+    /**
+     * Registration issues a session immediately, unverified. Confirmation gates what the
+     * account can *do* (submitting, purchasing — see EmailVerificationGuard), not whether it
+     * can log in: bouncing someone to a "check your email" dead end is the single easiest way
+     * to lose them, and browsing costs nothing to allow.
+     * <p>
+     * The confirmation email is sent inside the same transaction as the insert, deliberately.
+     * EmailSender never throws (see its contract), so a mail failure can't roll the
+     * registration back — and the ordering means a committed account always has a token row
+     * committed with it, rather than a window where the user exists but has nothing to click.
+     */
     @Transactional
     public AuthResponse register(String email, String rawPassword, String displayName) {
         if (userRepository.existsByEmailIgnoreCase(email)) {
@@ -69,6 +90,7 @@ public class AuthService {
         }
         User user = new User(UUID.randomUUID(), email, passwordEncoder.encode(rawPassword), displayName);
         userRepository.save(user);
+        emailVerificationService.issueAndSend(user);
         return issueTokens(user);
     }
 
@@ -172,28 +194,33 @@ public class AuthService {
     }
 
     /**
-     * Always succeeds from the caller's perspective (no user-enumeration signal).
-     * Email delivery isn't wired up yet, so the reset link is logged instead —
-     * swap this for a real email send once a provider (Postmark/SendGrid) is set up.
+     * Always succeeds from the caller's perspective, whether or not the address is
+     * registered — the response must not become a user-enumeration oracle. That's also why
+     * the send happens through EmailSender, which swallows delivery failures: a provider
+     * outage must not turn into a different response for a real address than a fake one.
+     * <p>
+     * No longer a stub. With SMTP configured this genuinely emails the link; with it unset
+     * (local dev) LoggingEmailSender writes the message to the console, which is the same
+     * behaviour this method used to have hard-coded.
      */
     @Transactional
     public void forgotPassword(String email) {
         userRepository.findByEmailIgnoreCase(email).ifPresent(user -> {
-            String rawToken = generateRawToken();
-            String tokenHash = sha256Hex(rawToken);
+            String rawToken = SecureTokens.generate();
             PasswordResetToken resetToken = new PasswordResetToken(
-                    UUID.randomUUID(), user.getId(), tokenHash, Instant.now().plus(passwordResetTtl));
+                    UUID.randomUUID(), user.getId(), SecureTokens.sha256Hex(rawToken),
+                    Instant.now().plus(passwordResetTtl));
             passwordResetTokenRepository.save(resetToken);
 
-            // STUB: log instead of emailing. In the web app, this becomes a link like
-            // http://localhost:5173/reset-password?token=<rawToken>
-            log.info("Password reset requested for {}. Reset token (would be emailed): {}", email, rawToken);
+            AuthEmails.Message message = AuthEmails.passwordReset(
+                    user.getDisplayName(), webBaseUrl + "/reset-password?token=" + rawToken);
+            emailSender.send(user.getEmail(), message.subject(), message.htmlBody(), message.textBody());
         });
     }
 
     @Transactional
     public void resetPassword(String rawToken, String newPassword) {
-        String tokenHash = sha256Hex(rawToken);
+        String tokenHash = SecureTokens.sha256Hex(rawToken);
         PasswordResetToken resetToken = passwordResetTokenRepository.findByTokenHash(tokenHash)
                 .orElseThrow(() -> new InvalidTokenException("Invalid or expired reset token"));
 
@@ -224,23 +251,4 @@ public class AuthService {
         return new AuthResponse(access.token(), refresh.token(), UserResponse.from(user));
     }
 
-    private static String generateRawToken() {
-        byte[] bytes = new byte[32];
-        SECURE_RANDOM.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    }
-
-    private static String sha256Hex(String value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 not available", e);
-        }
-    }
 }

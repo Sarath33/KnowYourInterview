@@ -50,6 +50,16 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-flyway</artifactId>
         </dependency>
+        <!-- Transactional email (registration confirmation, password reset) over SMTP, so
+             the provider is a config choice rather than a code dependency — Postmark,
+             SendGrid, Resend and Mailgun all speak it. Auto-configuration only creates a
+             JavaMailSender when spring.mail.host is set; with it unset the app falls back to
+             logging the message (see com.knowyourinterview.api.email.EmailConfig), same
+             graceful-degradation pattern as Razorpay/Google/Sentry. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-database-postgresql</artifactId>

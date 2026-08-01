@@ -24,6 +24,7 @@ function stubAuth(overrides: Partial<ReturnType<typeof useAuth>> = {}) {
     login: vi.fn(),
     googleLogin: vi.fn(),
     logout: vi.fn(),
+    refreshSession: vi.fn(),
     ...overrides,
   });
 }
@@ -34,6 +35,7 @@ function makeUser(overrides: Partial<User> = {}): User {
     email: "jane@example.com",
     displayName: "Jane",
     isAdmin: false,
+    emailVerified: true,
     createdAt: new Date().toISOString(),
     ...overrides,
   };
@@ -303,5 +305,28 @@ describe("SubmissionWorkspace", () => {
         expect.objectContaining({ roundType: "PHONE_SCREEN" }),
       ),
     );
+  });
+
+  /** Disabled rather than hidden, and with an explanation: an unconfirmed contributor should
+   * understand why they can't start, not just find the button missing. The server enforces
+   * the same rule in ExperienceService#createDraft regardless. */
+  it("blocks starting a new draft until the email is confirmed", async () => {
+    stubAuth({ user: makeUser({ emailVerified: false }) });
+    render(<SubmissionWorkspace />);
+
+    expect(await screen.findByRole("button", { name: /New draft/ })).toBeDisabled();
+    expect(screen.getByText(/Confirm your email address to start a submission/)).toBeInTheDocument();
+  });
+
+  it("leaves existing submissions reachable while unconfirmed", async () => {
+    const user = userEvent.setup();
+    stubAuth({ user: makeUser({ emailVerified: false }) });
+    mockedApi.listMyExperiences.mockResolvedValue([makeExperience({ status: "DRAFT" })]);
+    render(<SubmissionWorkspace />);
+
+    // The gate is on creating something new — a draft that already exists must not become
+    // unreachable, or an account could be left holding work it can't see.
+    await user.click(await screen.findByRole("button", { name: /Acme — Backend Engineer/ }));
+    expect(screen.getByRole("button", { name: "Add round" })).toBeInTheDocument();
   });
 });

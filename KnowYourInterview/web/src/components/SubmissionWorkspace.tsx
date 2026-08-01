@@ -13,26 +13,10 @@ import { StatusTag } from "./tags";
 import { FileTextIcon, PlusIcon } from "./icons";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useDraftAutosave } from "../lib/useDraftAutosave";
+import { ROUND_TYPES, roundTypeLabel } from "../lib/roundTypes";
 import { useAuth } from "../context/AuthContext";
 
 const OUTCOMES: ExperienceOutcome[] = ["OFFER", "REJECTED", "WITHDRAWN"];
-
-const ROUND_TYPES: { value: string; label: string }[] = [
-  { value: "PHONE_SCREEN", label: "Phone screen" },
-  { value: "ONSITE", label: "Onsite" },
-  { value: "SYSTEM_DESIGN", label: "System design" },
-  { value: "CODING", label: "Coding" },
-  { value: "TAKE_HOME", label: "Take-home" },
-  { value: "LIVE_DEBUGGING", label: "Live debugging" },
-  { value: "PRODUCT_SENSE", label: "Product sense" },
-  { value: "CASE_STUDY", label: "Case study" },
-  { value: "LEADERSHIP", label: "Leadership / behavioral" },
-  { value: "ONSITE_BAR_RAISER", label: "Bar raiser" },
-];
-
-function roundTypeLabel(roundType: string): string {
-  return ROUND_TYPES.find((t) => t.value === roundType)?.label ?? roundType;
-}
 
 interface RoundFormState {
   roundType: string;
@@ -738,6 +722,9 @@ function EditHistoryEntry({ snapshot }: { snapshot: ExperienceEditSnapshot }) {
 
 export function SubmissionWorkspace() {
   const { user } = useAuth();
+  // Defaults to true when there's somehow no user object, so a missing field can't disable
+  // the whole workspace — the server is the real gate either way.
+  const emailVerified = user?.emailVerified ?? true;
   const [experiences, setExperiences] = useState<ExperienceFull[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -852,6 +839,11 @@ export function SubmissionWorkspace() {
       <h1 className="page-title" style={{ marginBottom: 28 }}>
         My submissions
       </h1>
+      {!emailVerified && (
+        <p className="muted" style={{ marginTop: -14, marginBottom: 20, fontSize: 14 }}>
+          Confirm your email address to start a submission — existing drafts stay here in the meantime.
+        </p>
+      )}
       {error && <p className="error-text" style={{ marginBottom: 16 }}>{error}</p>}
       {loading ? (
         <p className="muted">Loading…</p>
@@ -876,6 +868,11 @@ export function SubmissionWorkspace() {
             ))}
             <button
               type="button"
+              // Disabled rather than hidden: an unconfirmed contributor should be able to see
+              // that submitting exists and why it's unavailable. The server enforces the same
+              // rule in ExperienceService#createDraft, so this is only an affordance.
+              disabled={!emailVerified}
+              title={emailVerified ? undefined : "Confirm your email address to start a submission"}
               onClick={() => {
                 setCreating(true);
                 setSelectedId(null);

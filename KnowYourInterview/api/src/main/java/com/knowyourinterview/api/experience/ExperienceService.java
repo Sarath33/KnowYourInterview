@@ -20,6 +20,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.knowyourinterview.api.auth.EmailVerificationGuard;
 import com.knowyourinterview.api.common.ForbiddenException;
 import com.knowyourinterview.api.common.InvalidStateException;
 import com.knowyourinterview.api.common.NotFoundException;
@@ -48,6 +49,7 @@ public class ExperienceService {
     private final ExperienceResponseAssembler responseAssembler;
     private final ExperienceEditSnapshotRepository editSnapshotRepository;
     private final ExperienceViewRepository experienceViewRepository;
+    private final EmailVerificationGuard emailVerificationGuard;
     private final int defaultPricePaise;
     private final int maxPageSize;
 
@@ -69,6 +71,7 @@ public class ExperienceService {
             ExperienceResponseAssembler responseAssembler,
             ExperienceEditSnapshotRepository editSnapshotRepository,
             ExperienceViewRepository experienceViewRepository,
+            EmailVerificationGuard emailVerificationGuard,
             @Value("${app.pricing.default-price-paise}") int defaultPricePaise,
             @Value("${app.pagination.max-page-size:100}") int maxPageSize) {
         this.experienceRepository = experienceRepository;
@@ -81,6 +84,7 @@ public class ExperienceService {
         this.responseAssembler = responseAssembler;
         this.editSnapshotRepository = editSnapshotRepository;
         this.experienceViewRepository = experienceViewRepository;
+        this.emailVerificationGuard = emailVerificationGuard;
         this.defaultPricePaise = defaultPricePaise;
         this.maxPageSize = maxPageSize;
     }
@@ -103,6 +107,9 @@ public class ExperienceService {
      */
     @Transactional
     public ExperienceFullResponse createDraft(UUID contributorId, boolean actorIsAdmin, ExperienceRequest req) {
+        // Gated at the very start of the contributor flow rather than only at submit time,
+        // so an unconfirmed user finds out before writing a long teaser, not after.
+        emailVerificationGuard.requireVerified(contributorId, "submitting an experience");
         String sourceUrl = blankToNull(req.sourceUrl());
         String sourceName = blankToNull(req.sourceName());
         boolean isReference = sourceUrl != null;
@@ -271,6 +278,12 @@ public class ExperienceService {
         roundRepository.deleteByExperienceId(experienceId);
         reviewLogRepository.deleteByExperienceId(experienceId);
         editSnapshotRepository.deleteByExperienceId(experienceId);
+        // Must be explicit: experience_views' FK doesn't cascade (V10), so leaving these
+        // behind fails the delete on a constraint violation — which the exception handler
+        // turns into an opaque 409. Reachable for a free/reference submission that was
+        // published, viewed by a signed-in user, then unpublished: neither the entitlement
+        // nor the payout guard above catches it, so this was the first thing to break.
+        experienceViewRepository.deleteByExperienceId(experienceId);
         experienceRepository.delete(experience);
         // Delete the stored files only after the whole delete commits — if the tx rolls
         // back the rows survive and their files must still be on disk (H1).
@@ -339,6 +352,10 @@ public class ExperienceService {
      * to accomplish there. */
     @Transactional
     public ExperienceFullResponse submitForReview(UUID contributorId, UUID experienceId) {
+        // Also guarded here, not just at createDraft: a draft may predate the gate (or
+        // predate the account becoming unverified), and this is the step that actually puts
+        // work in front of an admin and creates a payout liability.
+        emailVerificationGuard.requireVerified(contributorId, "submitting an experience");
         Experience experience = getOwned(contributorId, experienceId);
         requireResubmittable(experience,
                 "Only a draft, rejected, or correction-requested experience can be submitted for review");
@@ -379,9 +396,17 @@ public class ExperienceService {
     public PagedResponse<ExperienceTeaserResponse> browsePublished(
             UUID viewerId, String company, String roleTitle, String level, Short year, Boolean isFree,
             String search, String sort, int page, int size) {
+        // Both bounds matter, not just the upper one: PageRequest.of throws
+        // IllegalArgumentException on a negative page or a size below 1, which the catch-all
+        // exception handler would turn into a 500 for what is really a malformed request.
+        // Clamping instead of rejecting keeps a stale bookmark or a hand-edited query string
+        // from erroring at all — same forgiving posture resolveSort() takes on a sort value
+        // it doesn't recognise.
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(Math.max(1, size), maxPageSize);
         Page<Experience> result = experienceRepository.browsePublished(
                 blankToNull(company), blankToNull(roleTitle), blankToNull(level), year, isFree, searchPattern(search),
-                PageRequest.of(page, Math.min(size, maxPageSize), resolveSort(sort)));
+                PageRequest.of(safePage, safeSize, resolveSort(sort)));
         List<UUID> ids = result.getContent().stream().map(Experience::getId).toList();
         // An empty IN (...) list is invalid JPQL for most providers — skip the query(ies)
         // entirely for an empty page instead of sending a zero-length list.
@@ -421,6 +446,11 @@ public class ExperienceService {
      * they're the owner, an admin, or a purchaser — but only if they're signed in; a
      * guest's view is never recorded or counted, since there's no reliable identity to
      * dedupe a guest against. Not readOnly any more because of that write.
+     * <p>
+     * The increment goes through ExperienceRepository#incrementViewCount (an atomic,
+     * unversioned UPDATE) rather than the managed entity — see that method for why a
+     * read-modify-write here used to turn two concurrent first-views into a 409 for one of
+     * the two viewers. The re-read afterwards is what puts the fresh count in the response.
      */
     @Transactional
     public ExperienceViewResponse getPublicView(UUID viewerId, boolean viewerIsAdmin, UUID experienceId) {
@@ -445,8 +475,12 @@ public class ExperienceService {
             boolean isFirstViewByThisViewer =
                     experienceViewRepository.recordView(UUID.randomUUID(), experienceId, viewerId) > 0;
             if (isFirstViewByThisViewer) {
-                experience.incrementViewCount();
-                experienceRepository.save(experience);
+                experienceRepository.incrementViewCount(experienceId);
+                // incrementViewCount clears the persistence context, so the instance loaded
+                // above is detached and still holds the pre-increment count — re-read it so
+                // the viewer's own view is reflected in the response they get back.
+                experience = experienceRepository.findById(experienceId)
+                        .orElseThrow(() -> new NotFoundException("Experience not found"));
             }
         }
 
@@ -633,15 +667,21 @@ public class ExperienceService {
         return trimmed == null ? null : "%" + trimmed.toLowerCase() + "%";
     }
 
-    /** "newest" (default/unrecognized value) sorts by publishedAt descending; the other
-     * two sort by price. Falling back silently on an unrecognized value rather than
-     * throwing keeps a stale/bookmarked "sort=" query param from breaking the page. */
+    /** "newest" (default/unrecognized value) sorts by publishedAt descending; priceLow/
+     * priceHigh sort by price; "mostViewed" sorts by the one-per-user view count (see
+     * Experience#viewCount / ExperienceView) descending, publishedAt descending as the
+     * tiebreak for experiences tied on views (most commonly a bunch of untouched 0s).
+     * Falling back silently on an unrecognized value rather than throwing keeps a stale/
+     * bookmarked "sort=" query param from breaking the page. */
     private static Sort resolveSort(String sort) {
         if ("priceLow".equals(sort)) {
             return Sort.by(Sort.Direction.ASC, "pricePaise");
         }
         if ("priceHigh".equals(sort)) {
             return Sort.by(Sort.Direction.DESC, "pricePaise");
+        }
+        if ("mostViewed".equals(sort)) {
+            return Sort.by(Sort.Direction.DESC, "viewCount").and(Sort.by(Sort.Direction.DESC, "publishedAt"));
         }
         return Sort.by(Sort.Direction.DESC, "publishedAt");
     }

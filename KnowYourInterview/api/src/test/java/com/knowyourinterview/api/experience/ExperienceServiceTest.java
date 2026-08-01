@@ -17,6 +17,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.mock.web.MockMultipartFile;
 
+import com.knowyourinterview.api.auth.EmailNotVerifiedException;
+import com.knowyourinterview.api.auth.EmailVerificationGuard;
 import com.knowyourinterview.api.common.ForbiddenException;
 import com.knowyourinterview.api.common.InvalidStateException;
 import com.knowyourinterview.api.common.NotFoundException;
@@ -34,9 +36,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -71,6 +75,10 @@ class ExperienceServiceTest {
     private ExperienceEditSnapshotRepository editSnapshotRepository;
     @Mock
     private ExperienceViewRepository experienceViewRepository;
+    /** A mock does nothing by default, so every test here implicitly runs as a confirmed
+     * user. The tests that care about the gate stub it to throw instead. */
+    @Mock
+    private EmailVerificationGuard emailVerificationGuard;
 
     private ExperienceService service;
 
@@ -88,7 +96,7 @@ class ExperienceServiceTest {
                 experienceRepository, roundRepository, proofDocumentRepository,
                 proofStorageService, entitlementRepository, reviewLogRepository, payoutRepository,
                 responseAssembler, editSnapshotRepository, experienceViewRepository,
-                DEFAULT_PRICE_PAISE, MAX_PAGE_SIZE);
+                emailVerificationGuard, DEFAULT_PRICE_PAISE, MAX_PAGE_SIZE);
 
         // Default: every recordView call looks like a genuinely new view (return 1, as a
         // real INSERT ... ON CONFLICT DO NOTHING would for a viewer's first visit) — tests
@@ -814,21 +822,43 @@ class ExperienceServiceTest {
         assertThat(response.full().confidentialNote()).isNull();
     }
 
+    /** The increment goes through the repository's atomic UPDATE rather than mutating the
+     * entity and saving it — see ExperienceRepository#incrementViewCount for why (a
+     * versioned read-modify-write turned two viewers' concurrent first views into a 409 for
+     * one of them). Asserting on the call rather than on experience.getViewCount() is the
+     * point: nothing about the in-memory entity should change here. */
     @Test
     void getPublicViewIncrementsViewCountOnASignedInViewersFirstView() {
         Experience experience = draftOwnedByContributor();
         experience.markPendingReview();
         experience.publish();
-        assertThat(experience.getViewCount()).isZero();
         UUID viewerId = UUID.randomUUID();
         when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
         // Default stub (see setUp) returns 1 — a genuinely new (experience, viewer) pair.
 
         service.getPublicView(viewerId, false, experience.getId());
 
-        assertThat(experience.getViewCount()).isEqualTo(1L);
-        verify(experienceRepository).save(experience);
         verify(experienceViewRepository).recordView(any(), eq(experience.getId()), eq(viewerId));
+        verify(experienceRepository).incrementViewCount(experience.getId());
+        // Never through the versioned entity — that's what could collide.
+        verify(experienceRepository, never()).save(any());
+    }
+
+    /** incrementViewCount clears the persistence context, so the instance loaded at the top
+     * of getPublicView is detached and carries the pre-increment count. The response has to
+     * be built from a re-read, or a viewer's own view wouldn't show up until their next
+     * visit. */
+    @Test
+    void getPublicViewRereadsTheExperienceAfterCountingAView() {
+        Experience experience = draftOwnedByContributor();
+        experience.markPendingReview();
+        experience.publish();
+        UUID viewerId = UUID.randomUUID();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        service.getPublicView(viewerId, false, experience.getId());
+
+        verify(experienceRepository, times(2)).findById(experience.getId());
     }
 
     /** The whole point of the one-per-user dedup — see ExperienceView's Javadoc. A second
@@ -847,8 +877,7 @@ class ExperienceServiceTest {
 
         service.getPublicView(viewerId, false, experience.getId());
 
-        assertThat(experience.getViewCount()).isZero();
-        verify(experienceRepository, never()).save(experience);
+        verify(experienceRepository, never()).incrementViewCount(any());
     }
 
     /** Guests have no reliable identity to dedupe against, so their views are never
@@ -863,8 +892,7 @@ class ExperienceServiceTest {
 
         service.getPublicView(null, false, experience.getId());
 
-        assertThat(experience.getViewCount()).isZero();
-        verify(experienceRepository, never()).save(experience);
+        verify(experienceRepository, never()).incrementViewCount(any());
         verify(experienceViewRepository, never()).recordView(any(), any(), any());
     }
 
@@ -875,7 +903,7 @@ class ExperienceServiceTest {
 
         service.getPublicView(contributorId, false, experience.getId());
 
-        assertThat(experience.getViewCount()).isZero();
+        verify(experienceRepository, never()).incrementViewCount(any());
         verify(experienceViewRepository, never()).recordView(any(), any(), any());
     }
 
@@ -1034,6 +1062,35 @@ class ExperienceServiceTest {
                 eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(PageRequest.of(0, 100, NEWEST_SORT)));
     }
 
+    /** The lower bounds matter as much as the upper one: PageRequest.of throws
+     * IllegalArgumentException on a negative page or a size below 1, which nothing here
+     * handles specially — it would come back as a 500 for what's really just a malformed
+     * query string (a stale bookmark, a hand-edited URL). Clamped rather than rejected, the
+     * same forgiving posture resolveSort() takes on an unknown sort value. */
+    @Test
+    void browsePublishedClampsNegativePageAndSizeInsteadOfBlowingUp() {
+        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 1, NEWEST_SORT), 0);
+        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(page);
+
+        service.browsePublished(null, null, null, null, null, null, null, "newest", -3, -20);
+
+        verify(experienceRepository).browsePublished(
+                eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(PageRequest.of(0, 1, NEWEST_SORT)));
+    }
+
+    @Test
+    void browsePublishedClampsAZeroSizeToOne() {
+        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 1, NEWEST_SORT), 0);
+        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(page);
+
+        service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 0);
+
+        verify(experienceRepository).browsePublished(
+                eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(PageRequest.of(0, 1, NEWEST_SORT)));
+    }
+
     @Test
     void browsePublishedTreatsBlankFiltersAsNull() {
         Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
@@ -1089,6 +1146,20 @@ class ExperienceServiceTest {
         service.browsePublished(null, null, null, null, null, null, null, "priceHigh", 0, 20);
 
         verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceHighSort)));
+    }
+
+    @Test
+    void browsePublishedSortsByMostViewedWhenRequested() {
+        // publishedAt DESC is the tiebreak — see resolveSort's Javadoc — for experiences
+        // tied on viewCount, most commonly a bunch of untouched zeros.
+        Sort mostViewedSort = Sort.by(Sort.Direction.DESC, "viewCount").and(Sort.by(Sort.Direction.DESC, "publishedAt"));
+        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, mostViewedSort), 0);
+        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, mostViewedSort))))
+                .thenReturn(page);
+
+        service.browsePublished(null, null, null, null, null, null, null, "mostViewed", 0, 20);
+
+        verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, mostViewedSort)));
     }
 
     @Test
@@ -1311,6 +1382,47 @@ class ExperienceServiceTest {
                 .isInstanceOf(NotFoundException.class);
     }
 
+    // --- email verification gate ---
+
+    /** The gate is checked at the very start of the contributor flow, before any of the
+     * request is looked at — an unconfirmed user shouldn't get as far as writing a teaser
+     * and then be told no. */
+    @Test
+    void createDraftIsBlockedForAnUnconfirmedEmailAddress() {
+        doThrow(new EmailNotVerifiedException("Confirm your email address before submitting an experience."))
+                .when(emailVerificationGuard).requireVerified(eq(contributorId), any());
+
+        assertThatThrownBy(() -> service.createDraft(contributorId, false, sampleRequest()))
+                .isInstanceOf(EmailNotVerifiedException.class);
+
+        verify(experienceRepository, never()).save(any());
+    }
+
+    /** Guarded independently of createDraft: a draft can predate the gate, and this is the
+     * step that puts work in front of an admin and creates a payout liability. */
+    @Test
+    void submitForReviewIsBlockedForAnUnconfirmedEmailAddress() {
+        doThrow(new EmailNotVerifiedException("Confirm your email address before submitting an experience."))
+                .when(emailVerificationGuard).requireVerified(eq(contributorId), any());
+
+        assertThatThrownBy(() -> service.submitForReview(contributorId, UUID.randomUUID()))
+                .isInstanceOf(EmailNotVerifiedException.class);
+    }
+
+    /** Reading is deliberately not gated — an unconfirmed account can still look around, and
+     * gating browse would cost signups without protecting anything. */
+    @Test
+    void readingAnExperienceIsNotGatedOnEmailVerification() {
+        Experience experience = draftOwnedByContributor();
+        experience.markPendingReview();
+        experience.publish();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+
+        service.getPublicView(UUID.randomUUID(), false, experience.getId());
+
+        verify(emailVerificationGuard, never()).requireVerified(any(), any());
+    }
+
     // --- deleteExperience ---
 
     @Test
@@ -1329,6 +1441,28 @@ class ExperienceServiceTest {
         verify(roundRepository).deleteByExperienceId(experience.getId());
         verify(reviewLogRepository).deleteByExperienceId(experience.getId());
         verify(editSnapshotRepository).deleteByExperienceId(experience.getId());
+        verify(experienceViewRepository).deleteByExperienceId(experience.getId());
+        verify(experienceRepository).delete(experience);
+    }
+
+    /** Regression test, same shape as the rejected-experience one below: experience_views'
+     * FK to experiences doesn't cascade either (see V10), so a published-then-unpublished
+     * experience that anyone signed-in ever opened couldn't be deleted at all — the delete
+     * failed on the constraint and surfaced as an opaque 409. Neither of the two guards in
+     * deleteExperience catches this case: a free contribution has no entitlement (nothing to
+     * buy) and no payout row (approve() skips those for free submissions), so it sails past
+     * both and straight into the database error. */
+    @Test
+    void deleteExperienceCleansUpRecordedViewsSoAPreviouslyPublishedOneCanBeDeleted() {
+        Experience experience = freeContributionDraftOwnedByContributor();
+        experience.publish();
+        experience.unpublish();
+        when(experienceRepository.findById(experience.getId())).thenReturn(Optional.of(experience));
+        when(proofDocumentRepository.findByExperienceId(experience.getId())).thenReturn(List.of());
+
+        service.deleteExperience(contributorId, experience.getId());
+
+        verify(experienceViewRepository).deleteByExperienceId(experience.getId());
         verify(experienceRepository).delete(experience);
     }
 

@@ -23,6 +23,7 @@ function stubAuth(overrides: Partial<ReturnType<typeof useAuth>> = {}) {
     login: vi.fn(),
     googleLogin: vi.fn(),
     logout: vi.fn(),
+    refreshSession: vi.fn(),
     ...overrides,
   });
 }
@@ -49,7 +50,7 @@ describe("AuthForms", () => {
     stubAuth({ login });
     const user = userEvent.setup();
 
-    render(<AuthForms onGuestBrowse={vi.fn()} />);
+    render(<AuthForms onGuestBrowse={vi.fn()} onForgotPassword={vi.fn()} />);
 
     await user.type(screen.getByLabelText("Email"), "jane@example.com");
     await user.type(screen.getByLabelText("Password"), "hunter22");
@@ -63,7 +64,7 @@ describe("AuthForms", () => {
     stubAuth({ register });
     const user = userEvent.setup();
 
-    render(<AuthForms onGuestBrowse={vi.fn()} />);
+    render(<AuthForms onGuestBrowse={vi.fn()} onForgotPassword={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: "Register" }));
     expect(screen.getByLabelText("Display name")).toBeInTheDocument();
@@ -83,7 +84,7 @@ describe("AuthForms", () => {
     stubAuth({ login });
     const user = userEvent.setup();
 
-    render(<AuthForms onGuestBrowse={vi.fn()} />);
+    render(<AuthForms onGuestBrowse={vi.fn()} onForgotPassword={vi.fn()} />);
 
     await user.type(screen.getByLabelText("Email"), "jane@example.com");
     await user.type(screen.getByLabelText("Password"), "wrongpassword");
@@ -97,9 +98,32 @@ describe("AuthForms", () => {
     const onGuestBrowse = vi.fn();
     const user = userEvent.setup();
 
-    render(<AuthForms onGuestBrowse={onGuestBrowse} />);
+    render(<AuthForms onGuestBrowse={onGuestBrowse} onForgotPassword={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Browse without an account" }));
 
     expect(onGuestBrowse).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers password recovery from the login tab and hands off to the reset flow", async () => {
+    stubAuth();
+    const onForgotPassword = vi.fn();
+    const user = userEvent.setup();
+
+    render(<AuthForms onGuestBrowse={vi.fn()} onForgotPassword={onForgotPassword} />);
+    await user.click(screen.getByRole("button", { name: "Forgot your password?" }));
+
+    expect(onForgotPassword).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the recovery link in register mode — there's no account to recover yet", async () => {
+    stubAuth();
+    const user = userEvent.setup();
+
+    render(<AuthForms onGuestBrowse={vi.fn()} onForgotPassword={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Forgot your password?" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Register" }));
+
+    expect(screen.queryByRole("button", { name: "Forgot your password?" })).not.toBeInTheDocument();
   });
 });
