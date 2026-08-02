@@ -788,6 +788,37 @@
   margin: 0 0 18px;
 }
 
+/* ---------- One-time code entry ---------- */
+
+.otp-inputs {
+  display: flex;
+  gap: 8px;
+}
+
+/* Monospace and centred so a run of digits reads cleanly, and wide enough to stay tappable on
+   a phone (44px is the usual minimum touch target). */
+.otp-input {
+  flex: 1;
+  min-width: 0;
+  height: 52px;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--surface);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-input);
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.otp-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
 /* ---------- Email confirmation banner ---------- */
 
 /* Warning-toned rather than error-toned: nothing has gone wrong, there's just an action

@@ -22,28 +22,35 @@ public final class AuthEmails {
 
     public record Message(String subject, String htmlBody, String textBody) {}
 
-    public static Message confirmEmail(String displayName, String confirmUrl) {
-        String subject = "Confirm your email — Know Your Interview";
+    /**
+     * The registration confirmation code.
+     * <p>
+     * The code goes in the subject line as well as the body, so it's readable from a
+     * notification or an inbox list without opening the message — which is most of the point of
+     * a code over a link, given the usual case is reading it on a phone and typing it somewhere
+     * else. Everything else stays deliberately plain: no link to click, nothing to get wrong.
+     */
+    public static Message confirmEmail(String displayName, String code, long ttlMinutes) {
+        String subject = code + " is your Know Your Interview confirmation code";
+        String expiry = ttlMinutes == 1 ? "1 minute" : ttlMinutes + " minutes";
 
         String html = wrap(
                 "Confirm your email",
                 greeting(displayName)
-                        + paragraph("Thanks for signing up. Confirm this address to start submitting "
+                        + paragraph("Thanks for signing up. Enter this code in the app to start submitting "
                                 + "interview experiences and unlocking other people's.")
-                        + button(confirmUrl, "Confirm my email")
-                        + paragraph(small("This link works once and expires in 24 hours. "
-                                + "If the button doesn't work, paste this into your browser:"))
-                        + paragraph(small(escape(confirmUrl)))
+                        + code(code)
+                        + paragraph(small("The code expires in " + expiry + " and can only be used once."))
                         + paragraph(small("If you didn't create this account, you can ignore this email — "
-                                + "nothing happens until the link is used.")));
+                                + "nothing happens until the code is entered.")));
 
         String text = greetingText(displayName)
-                + "Thanks for signing up. Confirm this address to start submitting interview\n"
-                + "experiences and unlocking other people's:\n\n"
-                + confirmUrl + "\n\n"
-                + "This link works once and expires in 24 hours.\n\n"
+                + "Thanks for signing up. Enter this code in the app to start submitting\n"
+                + "interview experiences and unlocking other people's:\n\n"
+                + "    " + code + "\n\n"
+                + "The code expires in " + expiry + " and can only be used once.\n\n"
                 + "If you didn't create this account, you can ignore this email — nothing\n"
-                + "happens until the link is used.\n";
+                + "happens until the code is entered.\n";
 
         return new Message(subject, html, text);
     }
@@ -110,6 +117,17 @@ public final class AuthEmails {
 
     private static String small(String content) {
         return "<span style=\"font-size:13px;color:#6b7280;word-break:break-all;\">" + content + "</span>";
+    }
+
+    /** The code itself, set large and letter-spaced so it's legible at a glance on a phone.
+     * Monospace matters more than it looks: in a proportional font, digits like 1 and 7 and a
+     * run of identical characters are easy to misread when retyping. */
+    private static String code(String value) {
+        return ("<p style=\"margin:0 0 20px;\"><span style=\"display:inline-block;"
+                + "font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;"
+                + "font-size:32px;font-weight:700;letter-spacing:0.18em;color:#1f2430;"
+                + "background:#f6f7f9;border:1px solid #e4e7ec;border-radius:10px;"
+                + "padding:14px 24px;\">%s</span></p>").formatted(escape(value));
     }
 
     private static String button(String url, String label) {

@@ -315,9 +315,14 @@ export interface ForgotPasswordRequest {
   email: string;
 }
 
-/** The raw token from a confirmation link's ?token= query param. */
+/** The address being confirmed plus the 6-digit code emailed to it. The address isn't
+ * redundant: a 6-digit code isn't unique enough to identify an account on its own, so it's
+ * checked against one specific user's live code — which is also what makes the per-code
+ * attempt limit meaningful. Sending it explicitly (rather than relying on the session) lets
+ * someone confirm from a device they haven't signed in on. */
 export interface VerifyEmailRequest {
-  token: string;
+  email: string;
+  code: string;
 }
 
 /** Addressed by email rather than by session, so the same endpoint serves both the

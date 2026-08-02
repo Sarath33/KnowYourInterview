@@ -78,7 +78,7 @@ public abstract class FunctionalTestBase {
             TRUNCATE TABLE
                 experience_views, entitlements, purchases, payouts, payout_accounts,
                 review_logs, experience_edit_snapshots, proof_documents, experience_rounds,
-                experiences, password_reset_tokens, users
+                experiences, password_reset_tokens, email_verification_tokens, users
             RESTART IDENTITY CASCADE
             """;
 
@@ -110,6 +110,12 @@ public abstract class FunctionalTestBase {
 
         // Uploads go to a per-JVM temp directory, never api/uploads/.
         registry.add("app.storage.proof-dir", PROOF_DIR::toString);
+
+        // Pinned blank so EmailConfig always selects LoggingEmailSender. Two reasons: no test
+        // may ever open an SMTP connection (a stray MAIL_HOST in the environment would
+        // otherwise make the suite try to mail real addresses), and EmailConfirmationFunctionalIT
+        // reads confirmation links out of what that sender logs.
+        registry.add("spring.mail.host", () -> "");
 
         // Two reasons, both deliberate. (1) It lets every request carry its own synthetic
         // client IP, so fixture setup can't exhaust the 5-registrations-per-minute bucket and
@@ -155,7 +161,22 @@ public abstract class FunctionalTestBase {
         return prefix + "-" + EMAIL_SEQUENCE.getAndIncrement() + "-" + System.nanoTime() + "@example.test";
     }
 
-    /** Registers a fresh ordinary user through the real registration endpoint. */
+    /**
+     * Registers a fresh ordinary user through the real registration endpoint, then confirms
+     * their email address so they can actually do things.
+     * <p>
+     * The confirmation is applied with a direct UPDATE rather than by following the emailed
+     * link, because the raw token only exists inside the message — the database keeps just its
+     * hash — so there is nothing for a fixture to redeem. That's a deliberate trade: this
+     * fixture exists to get tests to the behaviour they're actually about, and the
+     * confirmation flow itself is covered properly by {@code EmailConfirmationFunctionalIT}
+     * (which intercepts the real message) and by the gate tests that use
+     * {@link #registerUnconfirmedUser()}.
+     * <p>
+     * No re-login needed afterwards, unlike {@link #registerAdmin()}: the gate reads the
+     * database on every call rather than trusting a JWT claim, precisely so confirming takes
+     * effect without waiting for a new token.
+     */
     protected Actor registerUser() {
         return registerUser("Test User");
     }
@@ -165,11 +186,28 @@ public abstract class FunctionalTestBase {
     }
 
     protected Actor registerUser(String displayName, String email) {
+        Actor actor = registerUnconfirmedUser(displayName, email);
+        confirmEmail(email);
+        return actor;
+    }
+
+    /** Registers without confirming — for tests about the confirm-your-email gate itself. */
+    protected Actor registerUnconfirmedUser() {
+        return registerUnconfirmedUser("Unconfirmed User", uniqueEmail("unconfirmed"));
+    }
+
+    protected Actor registerUnconfirmedUser(String displayName, String email) {
         ResponseEntity<String> response = post("/api/v1/auth/register", null, registerBody(email, PASSWORD, displayName));
         assertThat(response.getStatusCode().value())
                 .as("registration fixture failed: %s", response.getBody())
                 .isEqualTo(201);
         return actorFrom(response, email, displayName);
+    }
+
+    /** Marks an address confirmed directly. See registerUser for why this isn't done by
+     * following the link. */
+    protected void confirmEmail(String email) {
+        jdbc.update("UPDATE users SET email_verified = true WHERE email = ?", email);
     }
 
     /**

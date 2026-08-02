@@ -68,9 +68,11 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             // address is using the app to send them mail, and a legitimate user needs it
             // roughly once.
             "/api/v1/auth/resend-verification", new Limit(3, Duration.ofMinutes(1)),
-            // Loose by comparison: the token is 256 bits of randomness, so brute-forcing it
-            // isn't the threat model — this is just a backstop against someone pointing a
-            // script at it. Matches reset-password, which redeems a token the same way.
+            // The third of the three controls that make a 6-digit code safe (the others being
+            // its 10-minute life and the 5-guess cap on each code — see
+            // EmailVerificationService). The per-code cap is the real defence; this bounds how
+            // fast someone can cycle through fresh codes to get fresh budgets, and it's the
+            // only one of the three that a distributed attacker can't sidestep by resending.
             "/api/v1/auth/verify-email", new Limit(10, Duration.ofMinutes(1)));
 
     private static final String FORWARDED_FOR = "X-Forwarded-For";

@@ -9,23 +9,32 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 /**
- * A single-use, expiring token proving control of an email address, handed out at
- * registration and redeemable once via POST /api/v1/auth/verify-email.
+ * A single-use, expiring 6-digit code proving control of an email address, emailed at
+ * registration and redeemed via POST /api/v1/auth/verify-email.
  * <p>
- * Deliberately a near-copy of {@link PasswordResetToken} rather than a shared base class or
- * a single table with a "purpose" column: the two have the same shape today but no reason to
- * stay identical (their lifetimes already differ — hours vs. one hour — and a reset token is
- * far more dangerous if leaked, so they'll likely diverge on things like invalidate-on-use
- * scope). Coupling them would make the next difference awkward rather than making today
- * simpler.
+ * Deliberately not sharing a base class or table with {@link PasswordResetToken}, and the gap
+ * between them is now the argument for that: a reset token is 256 random bits in a link and
+ * lives an hour; this is six digits typed by hand and lives ten minutes, with a guess counter
+ * a reset token has no use for. Coupling them would have made this divergence awkward.
  * <p>
- * Only the SHA-256 hash of the raw token is stored, same as password reset — the raw value
- * exists only in the emailed link, so a database leak doesn't hand anyone a working
- * confirmation link.
+ * The code is stored as a SHA-256 hash for consistency with the reset token, but see
+ * {@code SecureTokens}' class Javadoc: hashing six digits is not meaningful protection, since
+ * a million candidates can be exhausted instantly. The real defences are the short expiry and
+ * {@link #MAX_ATTEMPTS}.
  */
 @Entity
 @Table(name = "email_verification_tokens")
 public class EmailVerificationToken {
+
+    /**
+     * Wrong guesses allowed before the code is burned and the user has to request a new one.
+     * <p>
+     * Five is the usual figure, and the arithmetic supports it: against a million possibilities
+     * it gives an attacker a 1-in-200,000 chance per code, and the ten-minute expiry caps how
+     * many codes they can even work through. Low enough to be safe, high enough that someone
+     * fat-fingering a digit twice isn't sent back to their inbox.
+     */
+    public static final short MAX_ATTEMPTS = 5;
 
     @Id
     private UUID id;
@@ -44,6 +53,11 @@ public class EmailVerificationToken {
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
+
+    /** Wrong guesses so far. Counted against the row rather than per-IP, because rotating IPs
+     * would otherwise hand an attacker a fresh budget each time. */
+    @Column(nullable = false)
+    private short attempts;
 
     protected EmailVerificationToken() {
         // JPA
@@ -83,6 +97,21 @@ public class EmailVerificationToken {
 
     public boolean isExpired() {
         return Instant.now().isAfter(expiresAt);
+    }
+
+    public short getAttempts() {
+        return attempts;
+    }
+
+    /** True once the guess budget is gone. The caller burns the code at that point — leaving it
+     * alive but permanently rejecting would be indistinguishable from a wrong code to the user
+     * and would need the same handling anyway. */
+    public boolean isOutOfAttempts() {
+        return attempts >= MAX_ATTEMPTS;
+    }
+
+    public void recordFailedAttempt() {
+        this.attempts++;
     }
 
     public void markUsed() {

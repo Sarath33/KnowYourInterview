@@ -173,6 +173,29 @@ the rounds it's asking you to approve, and approving asks for confirmation first
 Neither the backend changes nor the frontend tests have been run — same JDK/Docker sandbox
 limitation as previous phases. `./mvnw verify` and `npm test` locally are the first things to do.
 
+## Email confirmation (2026-08-01)
+
+Registration emails a **6-digit code**, and an unconfirmed account can browse but can't submit
+an experience or unlock one until it's entered. Password-reset mail moved onto the same sender
+(and keeps its link — a reset has to land you on a page to type a new password anyway), so
+nothing auth-related is a log line any more. Google sign-ins skip confirmation (Google already
+verified the address), and every account that existed beforehand was grandfathered in by the
+migration, so the deploy locks nobody out.
+
+A code this short is only safe because of three things together — a 10-minute expiry, a cap of
+five wrong guesses counted **per code row** rather than per IP, and the endpoint rate limit.
+That reasoning, and the tests that hold it in place, are the part of the feature doc worth
+reading if this ever gets touched.
+
+Full detail — design decisions, token handling, rate limits, and the provider setup steps — is
+in **`10-email-confirmation.md`**.
+
+**One thing to do before this is real:** email sends over SMTP and is **off until configured**.
+With `MAIL_HOST` unset the app logs the message instead of sending it (fine locally, not in
+production). Create a provider account, verify a sending domain, then set the `MAIL_*` vars and
+`WEB_BASE_URL` on the API service — see `06-deployment.md`. Everything works either way; the
+links just come out in the log until then.
+
 ## Reference docs
 
 - `01-build-roadmap.md` — full prerequisites + 8-phase roadmap.
@@ -182,3 +205,4 @@ limitation as previous phases. `./mvnw verify` and `npm test` locally are the fi
 - `06-deployment.md` — live Railway deployment: URLs, env vars, volumes, gotchas, known gaps.
 - `07-application-review.md` — end-to-end review (2026-08-01): bugs, gaps, code health, doc drift.
 - `08-fixes-2026-08-01.md` — what that review's §1–§2 items were fixed with, and how to verify.
+- `10-email-confirmation.md` — registration email confirmation + the SMTP sender, and how to configure it.

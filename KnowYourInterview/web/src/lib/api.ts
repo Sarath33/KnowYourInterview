@@ -213,10 +213,10 @@ export async function resetPassword(body: ResetPasswordRequest): Promise<Message
   );
 }
 
-/** Redeems a confirmation link. skipAuthRefresh matters here: the person clicking the link
- * often isn't signed in on the device that opened their email, and a 401 from this endpoint
- * means "bad token" — letting the generic handler treat it as an expired session would bounce
- * them to /login mid-confirmation. */
+/** Checks a confirmation code. skipAuthRefresh matters here: the person typing the code often
+ * isn't signed in on the device that received it, and a 401 from this endpoint means "wrong or
+ * expired code" — letting the generic handler treat it as an expired session would bounce them
+ * to /login mid-confirmation. */
 export async function verifyEmail(body: VerifyEmailRequest): Promise<MessageResponse> {
   return request<MessageResponse>(
     "/api/v1/auth/verify-email",
@@ -225,7 +225,7 @@ export async function verifyEmail(body: VerifyEmailRequest): Promise<MessageResp
   );
 }
 
-/** Sends a fresh confirmation link and invalidates any earlier one. Resolves the same way for
+/** Sends a fresh confirmation code and invalidates any earlier one. Resolves the same way for
  * any address — an unknown or already-confirmed one included — so don't present the result as
  * proof the account exists. */
 export async function resendVerification(body: ResendVerificationRequest): Promise<MessageResponse> {

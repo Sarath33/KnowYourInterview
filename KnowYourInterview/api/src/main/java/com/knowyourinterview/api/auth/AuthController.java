@@ -79,21 +79,22 @@ public class AuthController {
     }
 
     /**
-     * Redeems a confirmation link. Public: the person clicking it may well not be signed in
-     * on the device that opened their email, and possession of the token is the proof —
-     * requiring a session on top would only lock out the case this exists to serve.
+     * Checks a confirmation code. Public: the person typing it often isn't signed in on the
+     * device that received it, and the code plus the address is the proof — requiring a session
+     * on top would lock out the case this exists to serve.
      */
     @PostMapping("/verify-email")
     public ResponseEntity<MessageResponse> verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
-        emailVerificationService.verify(request.token());
+        emailVerificationService.verify(request.email(), request.code());
         return ResponseEntity.ok(new MessageResponse("Email confirmed."));
     }
 
     /**
-     * Sends a fresh confirmation link, invalidating any previous one. Generic response
+     * Sends a fresh confirmation code, invalidating any previous one. Generic response
      * regardless of whether the address exists or is already confirmed — same
      * no-enumeration posture as forgot-password. Rate-limited harder than the rest of
-     * /auth/** (see RateLimitingFilter) because the abuse here lands in someone else's inbox.
+     * /auth/** (see RateLimitingFilter) because the abuse here lands in someone else's inbox,
+     * and because each resend issues a fresh guess budget.
      */
     @PostMapping("/resend-verification")
     public ResponseEntity<MessageResponse> resendVerification(

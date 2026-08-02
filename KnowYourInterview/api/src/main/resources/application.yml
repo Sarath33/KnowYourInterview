@@ -39,9 +39,11 @@ spring:
   # Transactional email over SMTP — works with Postmark, SendGrid, Resend, Mailgun or any
   # other provider, so switching vendors is these values and nothing else.
   #
-  # Leave MAIL_HOST unset (the default) and Spring Boot creates no JavaMailSender at all,
-  # which EmailConfig detects and falls back to logging the message instead of sending it.
-  # That's the local-dev path: confirmation and password-reset links appear in the console.
+  # Leave MAIL_HOST unset and EmailConfig falls back to logging the message instead of
+  # sending it. That's the local-dev path: confirmation and password-reset links appear in
+  # the console. Note EmailConfig keys that decision off this value being blank rather than
+  # off whether a JavaMailSender bean exists — with no env var this property is present-but-
+  # empty, which is still enough to trigger Spring Boot's mail auto-configuration.
   #
   # To actually send: set MAIL_HOST/MAIL_USERNAME/MAIL_PASSWORD (and MAIL_FROM_ADDRESS under
   # app.email below) to your provider's SMTP credentials. Port 587 with STARTTLS is the
@@ -112,10 +114,11 @@ app:
   password-reset:
     token-ttl-minutes: 60
   email-verification:
-    # Generous compared to the password-reset window above, on purpose: a reset is something
-    # you asked for and are waiting on, while a confirmation email competes with everything
-    # else in an inbox. Expiring it in an hour would mostly generate resends.
-    token-ttl-hours: 24
+    # Short on purpose, and much shorter than the password-reset window above. This is a
+    # 6-digit code someone types straight after registering, not a link they might come back
+    # to — and a short code is only safe with a small window to guess in. The other two
+    # controls are EmailVerificationToken.MAX_ATTEMPTS and the rate limit on the endpoint.
+    code-ttl-minutes: 10
   email:
     # The From: on transactional mail. Must be an address at a domain the SMTP provider has
     # verified for sending, or messages will be rejected or land in spam regardless of the

@@ -94,6 +94,7 @@ way it is.
 | R10 | Browse returns wrong/leaky results | Wrong content shown; unpublished visible | `browsePublished` | **P1** |
 | R11 | Rate limiter bucketed wrong behind a proxy | Global lockout of all users | `RateLimitingFilter` | **P1** |
 | R12 | Error contract drift (500s where 4xx expected) | Broken client UX, noisy alerting | `ApiExceptionHandler` | **P2** |
+| R13 | Confirmation code brute-forced | Account confirmed without controlling the address — defeats the gate on submitting and purchasing | `EmailVerificationService.verify` | **P0** |
 
 ---
 
@@ -103,7 +104,7 @@ way it is.
 |---|---|
 | Command | `cd api && ./mvnw verify` |
 | Prerequisites | JDK 21, Maven wrapper, **Docker running** |
-| Postgres | `postgres:17-alpine` via Testcontainers, Flyway-migrated from `V1` to `V10` on startup |
+| Postgres | `postgres:17-alpine` via Testcontainers, Flyway-migrated from `V1` to the latest migration on startup |
 | Redis | `redis:7-alpine` via Testcontainers |
 | Fast subset | `./mvnw test` — unit + slice only, no Docker |
 | Single FT class | `./mvnw verify -Dit.test=PurchaseFunctionalIT` |
@@ -118,7 +119,7 @@ their own per-context containers via `ContainerConfig` and are left untouched.
 
 | Concern | Approach |
 |---|---|
-| Test independence | `@BeforeEach` truncates every application table (`users`, `experiences`, `experience_rounds`, `proof_documents`, `experience_edit_snapshots`, `experience_views`, `purchases`, `entitlements`, `payouts`, `payout_accounts`, `review_logs`, `password_reset_tokens`) with `CASCADE`, and flushes Redis. `flyway_schema_history` is never touched. Every test starts from an empty database. |
+| Test independence | `@BeforeEach` truncates every application table (`users`, `experiences`, `experience_rounds`, `proof_documents`, `experience_edit_snapshots`, `experience_views`, `purchases`, `entitlements`, `payouts`, `payout_accounts`, `review_logs`, `password_reset_tokens`, `email_verification_tokens`) with `CASCADE`, and flushes Redis. `flyway_schema_history` is never touched. Every test starts from an empty database. |
 | Users | Built via the real `POST /api/v1/auth/register` — no direct row inserts, so registration itself is exercised constantly. Emails are unique per call. |
 | Admins | Registered, then promoted via `POST /api/v1/auth/bootstrap-admin` (the real endpoint) and re-logged-in, because the `admin` claim is baked into the JWT at issue time. |
 | Rate-limit interference | The suite runs with `app.rate-limit.trust-forwarded-for=true` and every helper request carries a **unique `X-Forwarded-For`**, so ordinary fixture setup can't exhaust the 5-registrations-per-minute bucket. Rate-limit cases pin a fixed `X-Forwarded-For` deliberately. This is also, incidentally, direct coverage of the §1.3 proxy-IP fix. |
@@ -403,7 +404,7 @@ non-owner/non-admin, and as the legitimate actor.
 
 | ID | Case | Expected result | Pri | Risk |
 |---|---|---|---|---|
-| FT-OPS-01 | Flyway applied every migration cleanly | `flyway_schema_history` has V1–V10, all `success=true`, no failed rows | P1 | — |
+| FT-OPS-01 | Flyway applied every migration cleanly | `flyway_schema_history` has V1–V11, all `success=true`, no failed rows | P1 | — |
 | FT-OPS-02 | JPA schema validation passes | Context starts with `ddl-auto=validate` — every entity matches the migrated schema. Implicit in every FT, asserted explicitly here | P0 | — |
 | FT-OPS-03 | `GET /api/v1/health` | `200`, `UP` | P2 | — |
 | FT-OPS-04 | Actuator liveness/readiness are anonymous | `200` on both | P2 | — |
@@ -415,6 +416,42 @@ non-owner/non-admin, and as the legitimate actor.
 | FT-OPS-10 | Unknown route | `GET /api/v1/nope` → `401` or `404`, never a stack trace | P2 | R12 |
 | FT-OPS-11 | Oversized upload | 11 MB proof file → `413`, not `500` | P2 | R12 |
 | FT-OPS-12 | Internals never leak in an error body | No error response contains `Exception`, `org.springframework`, or a SQL fragment | P0 | R5 |
+
+### 7.14 Email confirmation — `FT-CONF` (`EmailConfirmationFunctionalIT`)
+
+Registration confirmation by **6-digit code**, not a link. Three halves, in descending order of
+how much they matter:
+
+1. **The guess limit.** A million possibilities is nothing to a script, so the cap on wrong
+   guesses is the only thing making a code this short acceptable. It's counted against the code
+   row, not per-IP — and the harness happens to prove that, since it gives every request its own
+   synthetic client IP, so FT-CONF-06's five guesses arrive from five different addresses and
+   the cap still holds.
+2. **The gate.** Too strict and a new signup can't browse, or gets bounced to `/login` by a
+   `401`; too loose and unverifiable addresses can publish content and move money.
+3. **The code lifecycle**, read the same way FT-PWD reads its link — out of what
+   `LoggingEmailSender` writes, since only the hash is persisted.
+
+New risk this section introduces: **R13 — a short confirmation code is brute-forceable**, P0,
+surfacing in `EmailVerificationService.verify`.
+
+| ID | Case | Precondition | Steps | Expected result | Pri | Risk |
+|---|---|---|---|---|---|---|
+| FT-CONF-01 | Registration emails a 6-digit code, account starts unconfirmed | — | `register` | `201`; `user.emailVerified` false; a 6-digit code is sent | P1 | R9 |
+| FT-CONF-02 | The code confirms the account | FT-CONF-01 | `verify-email` with the captured code → login | `200`; a new session reports `emailVerified` true | P1 | R9 |
+| FT-CONF-03 | Code stored hashed, never in plaintext | Registered | Read `email_verification_tokens.token_hash` | 64-char hex, not equal to the emailed code | P2 | R5 |
+| FT-CONF-04 | A malformed code is a 400 and costs no attempt | Registered | `verify-email` with `"abc"` | `400`; `attempts` still 0 — validation must not spend the budget | P1 | R13 |
+| FT-CONF-05 | A wrong code is rejected and counts | Registered | One wrong guess, then the right one | `401` then `200`; `attempts` = 1 — one slip isn't fatal | P1 | R13 |
+| FT-CONF-06 | **Burned after 5 wrong guesses, and the right code stops working** | Registered | 5 wrong guesses (from 5 different IPs), then the correct code | All `401`, including the correct one. If the right code still worked, the cap would only slow an attacker rather than stop them | **P0** | R13 |
+| FT-CONF-07 | Resending recovers from a burnout | Code burned | `resend-verification`, then the new code | `200` — a locked-out user has a way forward | P1 | R9 |
+| FT-CONF-08 | Resending invalidates the earlier code | Registered | `resend-verification`, then the *first* code | First → `401`; second → `200`. Otherwise each resend leaves another live code *and* another budget | **P0** | R13 |
+| FT-CONF-09 | Rejections are indistinguishable | — | Wrong code vs. unknown address | Identical message — otherwise the endpoint answers "is this address registered?" | P1 | R5 |
+| FT-CONF-10 | No user enumeration on resend | — | `resend-verification` for an unknown email | `200`, same generic message; nothing sent | P1 | R5 |
+| FT-CONF-11 | Unconfirmed can't create a draft | Unconfirmed user | `POST /experiences` | `403` (**not** `401` — a `401` would make the web client refresh then log out), message names the fix | P0 | R2 |
+| FT-CONF-12 | Unconfirmed can't open a checkout | Unconfirmed user, published experience | `POST /experiences/{id}/purchase` | `403` | P0 | R2 |
+| FT-CONF-13 | Unconfirmed can still log in, browse and read | Unconfirmed user | Browse, detail, `/experiences/mine`, `/payouts/mine` | `200` on all — gating these would cost signups and protect nothing | P1 | R11 |
+| FT-CONF-14 | Confirming lifts the gate with no new token | Unconfirmed user blocked once | Confirm, retry with the **same** access token | `201` — the guard reads the database, not a JWT claim | P1 | R11 |
+| FT-CONF-15 | Google sign-ins arrive confirmed, with no code | — | `POST /auth/google` | `200`, `emailVerified` true, nothing sent | P1 | R9 |
 
 ---
 
@@ -435,7 +472,12 @@ non-owner/non-admin, and as the legitimate actor.
 | FT-HOOK | 11 | `functional/WebhookFunctionalIT.java` |
 | FT-POUT | 12 | `functional/PayoutFunctionalIT.java` |
 | FT-OPS | 12 | `functional/PlatformFunctionalIT.java` |
-| | **185** | |
+| FT-CONF | 15 | `functional/EmailConfirmationFunctionalIT.java` |
+| | **200** | |
+
+192 `@Test` methods implement these 196 cases — a handful of closely-related cases share one
+method where splitting them would mean repeating the same fixture (they carry both IDs in the
+`@DisplayName`), and a few methods cover sub-cases lettered `-01b`, `-05b` and so on.
 
 Every test method is annotated with its case ID in a `@DisplayName`, so a failure report names
 the case directly. Harness lives in `functional/support/`.
@@ -468,6 +510,16 @@ constraint.
   scope for the implementation, so also for the tests.
 - **G8 — No test asserts that proof files are encrypted at rest**, because they aren't. Open
   item #3 in `04-handoff.md`.
+- **G9 — `ApiExceptionHandler`'s catch-all may be shadowing framework status mappings.**
+  FT-OPS-09 and FT-OPS-09b expect `405` for a wrong HTTP method and `415` for an unsupported
+  content type. Spring maps both correctly in `DefaultHandlerExceptionResolver` — but
+  `ExceptionHandlerExceptionResolver` runs *first*, and `ApiExceptionHandler` declares
+  `@ExceptionHandler(Exception.class)`, which will match `HttpRequestMethodNotSupportedException`
+  and `HttpMediaTypeNotSupportedException` and turn both into `500`. If those two tests fail,
+  that is the reason and it is a real defect (500s where 4xx belongs: broken client behaviour,
+  and every one of them pages someone). The fix is to have `ApiExceptionHandler` extend
+  `ResponseEntityExceptionHandler`, or to add explicit handlers for those types — not to relax
+  the tests.
 
 ---
 
@@ -488,3 +540,47 @@ constraint.
 make it pass, confirm the *specification* in this document is wrong; if the code is wrong, fix
 the code. Findings that turn out to be genuine bugs get filed against
 `07-application-review.md`'s numbering scheme.
+
+---
+
+## 11. Running it the first time
+
+**None of this suite has been executed yet** — it was written against the source, in an
+environment with no JDK 21, Maven or Docker. Treat the first run as part of the work, not as a
+formality. The same caveat applied to Phases 4 and 5, and everything turned out to compile, but
+that isn't a guarantee.
+
+```bash
+cd api
+./mvnw test                                     # unit + slice, no Docker — should stay green
+./mvnw verify                                   # adds every *IT, needs Docker running
+./mvnw verify -Dit.test=AuthFunctionalIT        # one class while iterating
+./mvnw verify -Dit.test='*FunctionalIT'         # just the new suite
+```
+
+Expect the first `verify` to take a few minutes: it pulls `postgres:17-alpine` and
+`redis:7-alpine`, then starts one Spring context shared by every functional class.
+
+**Read failures in this order.**
+
+1. *Everything fails identically, before any assertion* — infrastructure, not logic. Docker not
+   running, or the shared context failed to start. The stack trace at the top of the first
+   failure is the real message; the rest are noise.
+2. *Compilation errors* — most likely candidates, in order: the `org.springframework.boot.resttestclient`
+   package names (Spring Boot 4 moved `TestRestTemplate`; the existing `AuthFlowIT` uses the same
+   imports, so cross-check against it), and `com.razorpay.Utils.getHash` (also already used by
+   `PurchaseFlowIT`).
+3. *One class fails, the rest pass* — a real assertion. Check it against §7 before touching
+   anything: the expected result there is the specification.
+
+**Three tests are expected to fail, and each is a finding rather than a bug in the test.**
+FT-REVIEW-13 (gap G5, re-approval blocked by the payout `UNIQUE` constraint), FT-OPS-09 and
+FT-OPS-09b (gap G9, the catch-all exception handler shadowing `405`/`415`). Each carries a
+comment naming the gap and the fix. If they pass, delete the corresponding gap from §9 — that
+means the behaviour is already correct and the concern was mine, not the code's.
+
+**If a functional test is flaky**, suspect these three things in order: a fixture that assumed an
+empty database (every test truncates, so nothing may leak between them), a rate-limit bucket
+shared because a request didn't get its own synthetic `X-Forwarded-For` (use the helpers in
+`FunctionalTestBase`, not raw `rest.exchange`), and a timing assumption in one of the two
+concurrency tests. Nothing here sleeps, and nothing should need to.

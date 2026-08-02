@@ -7,9 +7,14 @@ import { GoogleSignInButton } from "./GoogleSignInButton";
 export function AuthForms({
   onGuestBrowse,
   onForgotPassword,
+  onRegistered,
 }: {
   onGuestBrowse: () => void;
   onForgotPassword: () => void;
+  /** Called after a successful registration only — not after a login. Registering leaves the
+   * account unconfirmed with a code already in its inbox, so the useful next screen is the one
+   * that takes the code. */
+  onRegistered: () => void;
 }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const { login, register, googleLogin } = useAuth();
@@ -39,6 +44,7 @@ export function AuthForms({
         await login(email, password);
       } else {
         await register(email, password, displayName);
+        onRegistered();
       }
     } catch (err) {
       setError(errorMessage(err));

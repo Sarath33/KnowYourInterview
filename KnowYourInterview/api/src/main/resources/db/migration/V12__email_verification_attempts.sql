@@ -1,0 +1,11 @@
+-- Confirmation switched from an emailed link (a 256-bit token) to a 6-digit code typed into
+-- the app. That change is what makes this column necessary.
+--
+-- A 256-bit token needs no attempt limit: guessing it is not a threat model. A 6-digit code has
+-- a million possibilities, which a script can exhaust in seconds — so the count of wrong
+-- guesses has to be tracked and capped, and it has to be tracked *server-side against the row*
+-- rather than per-IP, since rotating IPs would otherwise reset the budget.
+--
+-- Separate migration rather than an edit to V11: V11 may already have been applied somewhere,
+-- and changing an applied migration's checksum makes Flyway refuse to start.
+ALTER TABLE email_verification_tokens ADD COLUMN attempts SMALLINT NOT NULL DEFAULT 0;

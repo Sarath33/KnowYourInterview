@@ -63,9 +63,9 @@ function parseRoute(pathname: string): Route {
   // someone who's still logged in on this device is exactly who might be resetting a
   // password they no longer remember.
   if (pathname === "/reset-password") return { name: "resetPassword" };
-  // Where EmailVerificationService's confirmation link points. Public and not redirected for
-  // a signed-in user either — someone can easily be logged in on their laptop while opening
-  // the email on their phone, or vice versa, and either device must be able to redeem it.
+  // Where a new account types its emailed code. Public, and not redirected away for a signed-in
+  // user either — someone can easily be logged in on their laptop while the code arrives on
+  // their phone, and either device has to be able to enter it.
   if (pathname === "/confirm-email") return { name: "confirmEmail" };
   const browseMatch = pathname.match(/^\/browse(?:\/([^/]+))?\/?$/);
   if (browseMatch) return { name: "browse", experienceId: browseMatch[1] ?? null };
@@ -139,6 +139,10 @@ function AppContent() {
           <AuthForms
             onGuestBrowse={() => navigate("/browse")}
             onForgotPassword={() => navigate("/forgot-password")}
+            // Straight to the code screen after signing up — the code is already in their
+            // inbox and entering it is the only thing standing between them and a usable
+            // account. Logging in goes to /browse as before; only registration diverts.
+            onRegistered={() => navigate("/confirm-email")}
           />
         );
       case "forgotPassword":
@@ -151,12 +155,7 @@ function AppContent() {
           />
         );
       case "confirmEmail":
-        return (
-          <ConfirmEmail
-            token={new URLSearchParams(search).get("token")}
-            onContinue={() => navigate(isAuthenticated ? "/browse" : "/login")}
-          />
-        );
+        return <ConfirmEmail onContinue={() => navigate(isAuthenticated ? "/browse" : "/login")} />;
       case "browse":
         return route.experienceId ? (
           <ExperienceDetail
@@ -246,7 +245,7 @@ function AppContent() {
             the page that's actively confirming it would be nonsense, and the banner's own
             "resend" would compete with the link they just clicked. */}
         {isAuthenticated && user && !user.emailVerified && route.name !== "confirmEmail" && (
-          <UnverifiedEmailBanner email={user.email} />
+          <UnverifiedEmailBanner email={user.email} onEnterCode={() => navigate("/confirm-email")} />
         )}
         {renderRoute()}
       </main>

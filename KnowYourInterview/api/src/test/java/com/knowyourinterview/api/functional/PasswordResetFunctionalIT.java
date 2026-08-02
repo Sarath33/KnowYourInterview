@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 
-import com.knowyourinterview.api.auth.AuthService;
+import com.knowyourinterview.api.email.LoggingEmailSender;
 import com.knowyourinterview.api.functional.support.FunctionalTestBase;
 
 import ch.qos.logback.classic.Level;
@@ -30,13 +30,18 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code docs/09-test-plan.md} §7.2.
  *
  * <h2>Why this test reads the application log</h2>
- * There is no email provider yet, so {@code AuthService#forgotPassword} logs the reset link
- * instead of sending it, and the raw token is never persisted (only its SHA-256 hash is). The
- * log line is therefore the <em>actual</em> delivery channel today — an operator reads it out and
- * hands it to the user — so capturing it is not a hack around the design, it is the only way to
- * test the flow a user really goes through, and it doubles as a check that the link is
- * well-formed and complete. When a real provider is wired up, this capture is the one thing here
- * that needs replacing (with a fake mailer); every assertion below stays valid.
+ * The raw token is never persisted (only its SHA-256 hash is), so the delivered message is the
+ * only place it exists — capturing it isn't a hack around the design, it's the only way to test
+ * the flow a user really goes through, and it doubles as a check that the link is well-formed
+ * and complete.
+ *
+ * <p>Reset mail now goes through {@code EmailSender} rather than a hard-coded log line in
+ * {@code AuthService}. With no SMTP host configured — which is the case for this suite, and the
+ * default everywhere except a configured deployment — {@code EmailConfig} selects
+ * {@link LoggingEmailSender}, which writes the message out instead of sending it. So the capture
+ * point moved from {@code AuthService}'s logger to that one; what's being captured is still the
+ * genuine delivery channel for this configuration, and the real {@code EmailConfig} selection
+ * logic stays under test rather than being replaced by a fake mailer.
  */
 class PasswordResetFunctionalIT extends FunctionalTestBase {
 
@@ -44,21 +49,21 @@ class PasswordResetFunctionalIT extends FunctionalTestBase {
             Pattern.compile("(https?://\\S+)/reset-password\\?token=([A-Za-z0-9_-]+)");
 
     private ListAppender<ILoggingEvent> logCapture;
-    private Logger authServiceLogger;
+    private Logger emailSenderLogger;
 
     @BeforeEach
-    void captureAuthServiceLog() {
-        authServiceLogger = (Logger) LoggerFactory.getLogger(AuthService.class);
+    void captureEmailLog() {
+        emailSenderLogger = (Logger) LoggerFactory.getLogger(LoggingEmailSender.class);
         logCapture = new ListAppender<>();
         logCapture.start();
-        authServiceLogger.addAppender(logCapture);
-        authServiceLogger.setLevel(Level.INFO);
+        emailSenderLogger.addAppender(logCapture);
+        emailSenderLogger.setLevel(Level.INFO);
     }
 
     @AfterEach
-    void releaseAuthServiceLog() {
-        if (authServiceLogger != null && logCapture != null) {
-            authServiceLogger.detachAppender(logCapture);
+    void releaseEmailLog() {
+        if (emailSenderLogger != null && logCapture != null) {
+            emailSenderLogger.detachAppender(logCapture);
             logCapture.stop();
         }
     }
@@ -214,9 +219,9 @@ class PasswordResetFunctionalIT extends FunctionalTestBase {
     }
 
     /**
-     * Pulls the single reset link out of what {@code AuthService} logged, and asserts along the
-     * way that the link is complete and absolute — a bare token, or one built against the wrong
-     * base URL, would be useless to the operator who has to forward it.
+     * Pulls the single reset link out of the message the email sender wrote, and asserts along
+     * the way that the link is complete and absolute — a bare token, or one built against the
+     * wrong base URL, would be useless to whoever has to act on it.
      */
     private String capturedResetToken() {
         List<ILoggingEvent> events = List.copyOf(logCapture.list);
@@ -231,7 +236,7 @@ class PasswordResetFunctionalIT extends FunctionalTestBase {
             }
         }
         assertThat(matched)
-                .as("expected AuthService to log a reset link; captured: %s", events)
+                .as("expected a reset link in the sent email; captured: %s", events)
                 .isNotNull();
         return matched;
     }

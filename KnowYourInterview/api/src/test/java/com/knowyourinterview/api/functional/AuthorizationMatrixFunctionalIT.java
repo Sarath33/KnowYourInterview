@@ -149,6 +149,9 @@ class AuthorizationMatrixFunctionalIT extends FunctionalTestBase {
         UUID experienceId = publishedExperience(contributor, admin);
         UUID payoutId = UUID.fromString(
                 jdbc.queryForObject("SELECT id::text FROM payouts LIMIT 1", String.class));
+        // One APPROVED entry already exists from the fixture's own approval — the point below
+        // is that the outsider's attempts add nothing to it.
+        long reviewLogsBefore = countRows("review_logs");
 
         for (Route route : adminRoutes(experienceId, payoutId)) {
             ResponseEntity<String> response =
@@ -160,7 +163,8 @@ class AuthorizationMatrixFunctionalIT extends FunctionalTestBase {
         }
         // Nothing was mutated on the way through.
         assertThat(countRows("payouts", "status = 'PAID'")).isZero();
-        assertThat(countRows("review_logs")).isZero();
+        assertThat(countRows("review_logs")).isEqualTo(reviewLogsBefore);
+        assertThat(statusOfExperience(experienceId)).isEqualTo("PUBLISHED");
     }
 
     @Test

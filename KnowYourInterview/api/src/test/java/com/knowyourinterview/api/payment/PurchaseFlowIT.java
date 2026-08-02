@@ -63,6 +63,10 @@ class PurchaseFlowIT {
         registry.add("app.razorpay.key-secret", () -> RAZORPAY_KEY_SECRET);
         registry.add("app.storage.proof-dir",
                 () -> System.getProperty("java.io.tmpdir") + "/kyi-it-proof-" + UUID.randomUUID());
+        // No test may open an SMTP connection: a blank host makes EmailConfig select
+        // LoggingEmailSender. Pinned rather than relying on the ${MAIL_HOST:} default, so a
+        // developer with MAIL_HOST exported doesn't have this suite mail its fixture addresses.
+        registry.add("spring.mail.host", () -> "");
     }
 
     @Autowired
