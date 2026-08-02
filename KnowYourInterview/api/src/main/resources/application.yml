@@ -160,6 +160,18 @@ app:
     # Upper bound on the page size a Browse request can ask for — clamps a caller passing
     # ?size=5000 down to something sane. Wired into ExperienceService.browsePublished.
     max-page-size: 100
+  search:
+    # pg_trgm similarity cutoff (0.0–1.0) for the typo-tolerant keyword search in
+    # ExperienceService.browsePublished: a company/role/teaser is a fuzzy hit when its
+    # trigram similarity to the query is at least this. Lower = more forgiving of typos but
+    # noisier; 0.3 is pg_trgm's own default (pg_trgm.similarity_threshold) and a sane balance.
+    similarity-threshold: 0.3
+    # Separate, deliberately-lower cutoff for the "did you mean" suggestions endpoint
+    # (ExperienceService.suggest / GET /api/v1/experiences/suggestions). That endpoint is the
+    # fallback the frontend fires when a strict browse returned nothing, so it should surface
+    # near-misses the 0.3 search cutoff would drop — a more forgiving 0.15 trades some noise
+    # for actually having something to suggest.
+    suggestion-threshold: 0.15
   rate-limit:
     # Does a trusted proxy sit in front of this app and set X-Forwarded-For? Off by default,
     # which is right for local dev and for anything directly internet-facing (the header is

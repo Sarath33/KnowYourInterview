@@ -20,35 +20,128 @@ public interface ExperienceRepository extends JpaRepository<Experience, UUID> {
 
     List<Experience> findByStatusOrderByCreatedAtAsc(ExperienceStatus status);
 
-    // The CAST(:param AS string) on each nullable filter isn't decorative — Postgres plans
-    // the whole WHERE clause up front, including the LOWER(:param) branch, even though the
-    // ":param IS NULL OR ..." check means it's never evaluated at runtime for a null filter.
-    // Without an explicit type, a null parameter arrives with no type info and LOWER() can't
-    // resolve an overload for it ("function lower(bytea) does not exist"). The cast fixes that.
-    // searchPattern arrives pre-wrapped with "%...%" wildcards from the service (already
-    // lowercased) rather than built with CONCAT/LOWER here — keeps this query symmetric
-    // with the other filters' null-check style and avoids a CONCAT-inside-CAST mess.
-    @Query("""
-            SELECT e FROM Experience e
-            WHERE e.status = com.knowyourinterview.api.experience.ExperienceStatus.PUBLISHED
-              AND (:company IS NULL OR LOWER(e.company) = LOWER(CAST(:company AS string)))
-              AND (:roleTitle IS NULL OR LOWER(e.roleTitle) = LOWER(CAST(:roleTitle AS string)))
-              AND (:level IS NULL OR LOWER(e.level) = LOWER(CAST(:level AS string)))
-              AND (:year IS NULL OR e.interviewYear = :year)
-              AND (:isFree IS NULL OR e.free = :isFree)
-              AND (:searchPattern IS NULL
-                   OR LOWER(e.company) LIKE CAST(:searchPattern AS string)
-                   OR LOWER(e.roleTitle) LIKE CAST(:searchPattern AS string)
-                   OR LOWER(e.teaser) LIKE CAST(:searchPattern AS string))
-            """)
+    // Native (not JPQL) because the relevance ranking needs pg_trgm's similarity() and a
+    // computed ORDER BY that Pageable's Sort can't express — the service passes an UNSORTED
+    // PageRequest and drives the sort with the :sortMode param instead. Reads the STORED
+    // generated columns added in V15 (company_normalized / role_title_normalized /
+    // level_normalized), which aren't mapped on the entity; SELECT e.* still returns every
+    // mapped column, so Hibernate materializes a full Experience and simply ignores the
+    // extra normalized columns.
+    //
+    // Tier 1 — the company/role/level filters are normalized "contains": both the stored
+    // value (the generated column) and the query input (built by the service) are lower-cased
+    // with non-alphanumerics stripped, so "SDE-3"/"SDE 3"/"sde3" all match and typing "SDE"
+    // returns every SDE level.
+    //
+    // Tier 2 — search matches on a normalized contains (company/role), a plain lower-cased
+    // substring (teaser), OR pg_trgm similarity above :simThreshold, and results are ranked
+    // by the best similarity across company/role/teaser (closest first).
+    //
+    // Every nullable TEXT parameter is CAST(:x AS text): a null bind arrives with no type
+    // info, and Postgres otherwise can't type it inside a LIKE/similarity() call. (:year and
+    // :isFree don't need it — Postgres infers their type from the compared column.) The
+    // countQuery repeats the identical WHERE with no ORDER BY, as Spring Data requires for a
+    // native paginated query. e.id is the final tiebreaker so paging is stable when every
+    // ranking/sort key ties.
+    @Query(value = """
+            SELECT e.* FROM experiences e
+            WHERE e.status = 'PUBLISHED'
+              AND (CAST(:companyPat AS text) IS NULL OR e.company_normalized    LIKE CAST(:companyPat AS text))
+              AND (CAST(:rolePat    AS text) IS NULL OR e.role_title_normalized LIKE CAST(:rolePat    AS text))
+              AND (CAST(:levelPat   AS text) IS NULL OR e.level_normalized      LIKE CAST(:levelPat   AS text))
+              AND (:year IS NULL OR e.interview_year = :year)
+              AND (:isFree IS NULL OR e.is_free = :isFree)
+              AND (
+                CAST(:searchTerm AS text) IS NULL
+                OR e.company_normalized    LIKE CAST(:searchContains AS text)
+                OR e.role_title_normalized LIKE CAST(:searchContains AS text)
+                OR lower(e.teaser)         LIKE CAST(:searchLike AS text)
+                OR similarity(lower(e.company),    CAST(:searchTerm AS text)) >= :simThreshold
+                OR similarity(lower(e.role_title), CAST(:searchTerm AS text)) >= :simThreshold
+                OR similarity(lower(e.teaser),     CAST(:searchTerm AS text)) >= :simThreshold
+              )
+            ORDER BY
+              (CASE WHEN CAST(:searchTerm AS text) IS NOT NULL
+                    THEN GREATEST(similarity(lower(e.company),    CAST(:searchTerm AS text)),
+                                  similarity(lower(e.role_title), CAST(:searchTerm AS text)),
+                                  similarity(lower(e.teaser),     CAST(:searchTerm AS text)))
+                    ELSE 0 END) DESC,
+              (CASE WHEN :sortMode = 'priceLow'   THEN e.price_paise END) ASC NULLS LAST,
+              (CASE WHEN :sortMode = 'priceHigh'  THEN e.price_paise END) DESC NULLS LAST,
+              (CASE WHEN :sortMode = 'mostViewed' THEN e.view_count  END) DESC NULLS LAST,
+              e.published_at DESC NULLS LAST,
+              e.id
+            """,
+            countQuery = """
+            SELECT count(*) FROM experiences e
+            WHERE e.status = 'PUBLISHED'
+              AND (CAST(:companyPat AS text) IS NULL OR e.company_normalized    LIKE CAST(:companyPat AS text))
+              AND (CAST(:rolePat    AS text) IS NULL OR e.role_title_normalized LIKE CAST(:rolePat    AS text))
+              AND (CAST(:levelPat   AS text) IS NULL OR e.level_normalized      LIKE CAST(:levelPat   AS text))
+              AND (:year IS NULL OR e.interview_year = :year)
+              AND (:isFree IS NULL OR e.is_free = :isFree)
+              AND (
+                CAST(:searchTerm AS text) IS NULL
+                OR e.company_normalized    LIKE CAST(:searchContains AS text)
+                OR e.role_title_normalized LIKE CAST(:searchContains AS text)
+                OR lower(e.teaser)         LIKE CAST(:searchLike AS text)
+                OR similarity(lower(e.company),    CAST(:searchTerm AS text)) >= :simThreshold
+                OR similarity(lower(e.role_title), CAST(:searchTerm AS text)) >= :simThreshold
+                OR similarity(lower(e.teaser),     CAST(:searchTerm AS text)) >= :simThreshold
+              )
+            """,
+            nativeQuery = true)
     Page<Experience> browsePublished(
-            @Param("company") String company,
-            @Param("roleTitle") String roleTitle,
-            @Param("level") String level,
+            @Param("companyPat") String companyPat,
+            @Param("rolePat") String rolePat,
+            @Param("levelPat") String levelPat,
             @Param("year") Short year,
             @Param("isFree") Boolean isFree,
-            @Param("searchPattern") String searchPattern,
+            @Param("searchTerm") String searchTerm,
+            @Param("searchContains") String searchContains,
+            @Param("searchLike") String searchLike,
+            @Param("simThreshold") double simThreshold,
+            @Param("sortMode") String sortMode,
             Pageable pageable);
+
+    // The "did you mean" fallback the frontend fires when a strict browse returns zero rows.
+    // Same pg_trgm machinery as browsePublished's Tier 2 (normalized-contains on company/role,
+    // a plain lowered substring on the teaser, OR similarity() above a threshold), ranked by the
+    // best similarity across company/role/teaser — but DELIBERATELY with none of browse's strict
+    // company/role/level/year/isFree filters: this is the query that runs precisely because those
+    // filters just matched nothing, so re-imposing them would defeat the point. Uses a lower
+    // threshold than search (app.search.suggestion-threshold) so near-misses still surface.
+    //
+    // Every nullable TEXT param is CAST(:x AS text) for the same reason browsePublished does it —
+    // a null bind (e.g. qContains when the query strips to nothing alphanumeric) arrives with no
+    // type info and Postgres can't otherwise type it inside LIKE. Returns a plain List capped by
+    // LIMIT :limit (no paging, so no Pageable and no countQuery). e.id is the final tiebreaker so
+    // the order is deterministic when relevance and published_at tie.
+    @Query(value = """
+            SELECT e.* FROM experiences e
+            WHERE e.status = 'PUBLISHED'
+              AND (
+                e.company_normalized    LIKE CAST(:qContains AS text)
+                OR e.role_title_normalized LIKE CAST(:qContains AS text)
+                OR lower(e.teaser)         LIKE CAST(:qLike AS text)
+                OR similarity(lower(e.company),    CAST(:qTerm AS text)) >= :threshold
+                OR similarity(lower(e.role_title), CAST(:qTerm AS text)) >= :threshold
+                OR similarity(lower(e.teaser),     CAST(:qTerm AS text)) >= :threshold
+              )
+            ORDER BY GREATEST(similarity(lower(e.company),    CAST(:qTerm AS text)),
+                              similarity(lower(e.role_title), CAST(:qTerm AS text)),
+                              similarity(lower(e.teaser),     CAST(:qTerm AS text))) DESC,
+                     e.published_at DESC NULLS LAST,
+                     e.id
+            LIMIT :limit
+            """,
+            nativeQuery = true)
+    List<Experience> suggestPublished(
+            @Param("qContains") String qContains,
+            @Param("qLike") String qLike,
+            @Param("qTerm") String qTerm,
+            @Param("threshold") double threshold,
+            @Param("limit") int limit);
 
     /**
      * Bumps view_count in the database rather than through the managed entity, and

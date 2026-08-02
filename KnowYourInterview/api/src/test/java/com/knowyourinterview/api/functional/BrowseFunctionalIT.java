@@ -133,8 +133,8 @@ class BrowseFunctionalIT extends FunctionalTestBase {
     }
 
     @Test
-    @DisplayName("FT-BROWSE-04: the company filter is case-insensitive and exact")
-    void companyFilterIsCaseInsensitive() {
+    @DisplayName("FT-BROWSE-04: the company filter is a case- and punctuation-insensitive contains")
+    void companyFilterIsNormalizedContains() {
         Actor contributor = registerUser();
         Actor admin = registerAdmin();
         UUID acme = publishedExperience(contributor, admin, Payloads.experience("Acme", "Engineer", "A."));
@@ -142,8 +142,11 @@ class BrowseFunctionalIT extends FunctionalTestBase {
 
         assertThat(idsIn(browse("?company=acme"))).containsExactly(acme.toString());
         assertThat(idsIn(browse("?company=ACME"))).containsExactly(acme.toString());
-        // Exact match, not prefix — "Acm" must not match "Acme".
-        assertThat(idsIn(browse("?company=Acm"))).isEmpty();
+        // Tier 1 (V15): filters are now a normalized "contains", not an exact match, so a
+        // partial term matches — "Acm" finds "Acme". A term that isn't a substring of any
+        // normalized company still returns nothing.
+        assertThat(idsIn(browse("?company=Acm"))).containsExactly(acme.toString());
+        assertThat(idsIn(browse("?company=Zzz"))).isEmpty();
     }
 
     @Test

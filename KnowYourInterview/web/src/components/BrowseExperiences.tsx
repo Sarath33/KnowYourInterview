@@ -8,6 +8,7 @@ import { ArrowDownIcon, ArrowRightIcon, ArrowUpIcon, ClockIcon, EyeIcon } from "
 import { DropdownMenu } from "./DropdownMenu";
 import type { DropdownOption } from "./DropdownMenu";
 import { formatPaise, interviewedLabel, levelLine, publishedLabel, roundCountLabel, viewCountLabel } from "../lib/format";
+import type { ExperienceTeaser } from "../../../shared/types";
 
 const PAGE_SIZE = 20;
 
@@ -38,6 +39,36 @@ const SORT_OPTIONS: DropdownOption<SortOption>[] = [
   { value: "mostViewed", label: "Most viewed", icon: <EyeIcon /> },
 ];
 
+function BrowseCard({ exp, onSelect }: { exp: ExperienceTeaser; onSelect: (id: string) => void }) {
+  const recency = interviewedLabel(exp.interviewMonth, exp.interviewYear);
+  const posted = publishedLabel(exp.publishedAt);
+  return (
+    <div className="card card-pad-sm browse-card">
+      <div className="card-kicker">{levelLine(exp)}</div>
+      <div className="card-title">
+        {exp.company} — {exp.roleTitle}
+      </div>
+      <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 14, lineHeight: 1.5 }}>{exp.teaser}</p>
+      <div className="row" style={{ gap: 8 }}>
+        <OutcomeTag outcome={exp.outcome} />
+        {exp.isRemote && <RemoteTag />}
+        <span className="tag tag-neutral">{roundCountLabel(exp.roundCount)}</span>
+        {exp.unlocked && !exp.isFree && <UnlockedTag />}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
+        {[recency, posted, viewCountLabel(exp.viewCount)].filter(Boolean).join(" · ")}
+      </div>
+      <div className="browse-card-footer">
+        <span className="price-tag">{exp.isFree ? "Free" : formatPaise(exp.pricePaise)}</span>
+        <button type="button" onClick={() => onSelect(exp.id)} className="btn btn-outline btn-outline-accent">
+          View
+          <ArrowRightIcon />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: string) => void }) {
   const { accessToken } = useAuth();
   const [filters, setFilters] = useState<Filters>(emptyFilters);
@@ -66,6 +97,20 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
   const items = data?.items ?? [];
   const totalPages = data?.totalPages ?? 0;
   const totalItems = data?.totalItems ?? 0;
+
+  // "Did you mean" fallback: when the strict filter/search returns nothing, look up the
+  // closest published experiences by fuzzy similarity (ignoring the strict filters). Built
+  // from whatever free text the user entered — the search box plus the company/role filters.
+  const suggestQuery = [appliedFilters.search, appliedFilters.company, appliedFilters.roleTitle]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" ");
+  const wantSuggestions = !loading && !error && items.length === 0 && suggestQuery.length > 0;
+  const { data: suggestions } = useAsync(
+    () => api.getSearchSuggestions(suggestQuery, 6),
+    [suggestQuery, accessToken, wantSuggestions],
+    { enabled: wantSuggestions },
+  );
 
   const handleFilter = (e: FormEvent) => {
     e.preventDefault();
@@ -181,41 +226,30 @@ export function BrowseExperiences({ onSelect }: { onSelect: (experienceId: strin
           Loading…
         </p>
       ) : items.length === 0 ? (
-        <p className="muted">Nothing published matches that filter yet.</p>
+        <div>
+          <p className="muted">Nothing published matches that filter yet.</p>
+          {wantSuggestions && suggestions && suggestions.length > 0 && (
+            <div style={{ marginTop: 28 }}>
+              <h2 className="section-title" style={{ fontSize: 18, marginBottom: 2 }}>
+                No exact matches{suggestQuery ? ` for “${suggestQuery}”` : ""} — did you mean…
+              </h2>
+              <p className="muted" style={{ marginTop: 0, marginBottom: 16 }}>
+                The closest published experiences we could find.
+              </p>
+              <div className="browse-grid">
+                {suggestions.map((exp) => (
+                  <BrowseCard key={exp.id} exp={exp} onSelect={onSelect} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <>
           <div className="browse-grid">
-            {items.map((exp) => {
-              const recency = interviewedLabel(exp.interviewMonth, exp.interviewYear);
-              const posted = publishedLabel(exp.publishedAt);
-              return (
-                <div key={exp.id} className="card card-pad-sm browse-card">
-                  <div className="card-kicker">{levelLine(exp)}</div>
-                  <div className="card-title">
-                    {exp.company} — {exp.roleTitle}
-                  </div>
-                  <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: 14, lineHeight: 1.5 }}>
-                    {exp.teaser}
-                  </p>
-                  <div className="row" style={{ gap: 8 }}>
-                    <OutcomeTag outcome={exp.outcome} />
-                    {exp.isRemote && <RemoteTag />}
-                    <span className="tag tag-neutral">{roundCountLabel(exp.roundCount)}</span>
-                    {exp.unlocked && !exp.isFree && <UnlockedTag />}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    {[recency, posted, viewCountLabel(exp.viewCount)].filter(Boolean).join(" · ")}
-                  </div>
-                  <div className="browse-card-footer">
-                    <span className="price-tag">{exp.isFree ? "Free" : formatPaise(exp.pricePaise)}</span>
-                    <button type="button" onClick={() => onSelect(exp.id)} className="btn btn-outline btn-outline-accent">
-                      View
-                      <ArrowRightIcon />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+            {items.map((exp) => (
+              <BrowseCard key={exp.id} exp={exp} onSelect={onSelect} />
+            ))}
           </div>
 
           {totalPages > 1 && (

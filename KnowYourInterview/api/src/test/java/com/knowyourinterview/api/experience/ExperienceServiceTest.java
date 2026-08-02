@@ -14,7 +14,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.mock.web.MockMultipartFile;
 
 import com.knowyourinterview.api.auth.EmailNotVerifiedException;
@@ -54,6 +53,8 @@ class ExperienceServiceTest {
 
     private static final int DEFAULT_PRICE_PAISE = 19900;
     private static final int MAX_PAGE_SIZE = 100;
+    private static final double SIMILARITY_THRESHOLD = 0.3;
+    private static final double SUGGESTION_THRESHOLD = 0.15;
 
     @Mock
     private ExperienceRepository experienceRepository;
@@ -96,7 +97,8 @@ class ExperienceServiceTest {
                 experienceRepository, roundRepository, proofDocumentRepository,
                 proofStorageService, entitlementRepository, reviewLogRepository, payoutRepository,
                 responseAssembler, editSnapshotRepository, experienceViewRepository,
-                emailVerificationGuard, DEFAULT_PRICE_PAISE, MAX_PAGE_SIZE);
+                emailVerificationGuard, DEFAULT_PRICE_PAISE, MAX_PAGE_SIZE, SIMILARITY_THRESHOLD,
+                SUGGESTION_THRESHOLD);
 
         // Default: every recordView call looks like a genuinely new view (return 1, as a
         // real INSERT ... ON CONFLICT DO NOTHING would for a viewer's first visit) — tests
@@ -986,16 +988,28 @@ class ExperienceServiceTest {
 
     // --- browsePublished ---
 
-    private static final Sort NEWEST_SORT = Sort.by(Sort.Direction.DESC, "publishedAt");
+    /** ORDER BY now lives inside the native browse query (relevance ranking can't be a
+     * Pageable Sort), so the service passes an UNSORTED PageRequest and the sort intent
+     * rides along as the sortMode String param. The repository is mocked here, so these
+     * assert on the params the service builds; the real SQL behavior (normalized contains,
+     * trigram ranking) is covered by BrowseSearchIT against a live Postgres. */
+    private void stubBrowseReturns(Page<Experience> page) {
+        when(experienceRepository.browsePublished(
+                        any(), any(), any(), any(), any(), any(), any(), any(),
+                        org.mockito.ArgumentMatchers.anyDouble(), any(), any()))
+                .thenReturn(page);
+    }
+
+    private static Page<Experience> pageOf(List<Experience> experiences, int size) {
+        return new PageImpl<>(experiences, PageRequest.of(0, size), experiences.size());
+    }
 
     @Test
     void browsePublishedMapsRepositoryPageToTeasers() {
         Experience experience = draftOwnedByContributor();
         experience.markPendingReview();
         experience.publish();
-        Page<Experience> page = new PageImpl<>(List.of(experience), PageRequest.of(0, 20, NEWEST_SORT), 1);
-        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
-                .thenReturn(page);
+        stubBrowseReturns(pageOf(List.of(experience), 20));
 
         var response = service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 20);
 
@@ -1008,9 +1022,7 @@ class ExperienceServiceTest {
         Experience experience = draftOwnedByContributor();
         experience.markPendingReview();
         experience.publish();
-        Page<Experience> page = new PageImpl<>(List.of(experience), PageRequest.of(0, 20, NEWEST_SORT), 1);
-        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
-                .thenReturn(page);
+        stubBrowseReturns(pageOf(List.of(experience), 20));
         ExperienceRoundRepository.ExperienceRoundCount count = mock(ExperienceRoundRepository.ExperienceRoundCount.class);
         when(count.getExperienceId()).thenReturn(experience.getId());
         when(count.getRoundCount()).thenReturn(3L);
@@ -1028,9 +1040,7 @@ class ExperienceServiceTest {
         Experience experience = draftOwnedByContributor();
         experience.markPendingReview();
         experience.publish();
-        Page<Experience> page = new PageImpl<>(List.of(experience), PageRequest.of(0, 20, NEWEST_SORT), 1);
-        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
-                .thenReturn(page);
+        stubBrowseReturns(pageOf(List.of(experience), 20));
         when(roundRepository.countByExperienceIdIn(List.of(experience.getId()))).thenReturn(List.of());
 
         var response = service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 20);
@@ -1040,9 +1050,7 @@ class ExperienceServiceTest {
 
     @Test
     void browsePublishedSkipsRoundCountQueryForAnEmptyPage() {
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
-                .thenReturn(page);
+        stubBrowseReturns(pageOf(List.of(), 20));
 
         var response = service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 20);
 
@@ -1052,125 +1060,140 @@ class ExperienceServiceTest {
 
     @Test
     void browsePublishedCapsPageSizeAtOneHundred() {
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 100, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 100, NEWEST_SORT))))
-                .thenReturn(page);
+        stubBrowseReturns(pageOf(List.of(), 100));
 
         service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 500);
 
+        // Sort now lives in the SQL, so the PageRequest is unsorted — PageRequest.of(0, 100)
+        // is exactly the unsorted request the service builds.
         verify(experienceRepository).browsePublished(
-                eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(PageRequest.of(0, 100, NEWEST_SORT)));
+                eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(null),
+                eq(SIMILARITY_THRESHOLD), eq("newest"), eq(PageRequest.of(0, 100)));
     }
 
     /** The lower bounds matter as much as the upper one: PageRequest.of throws
      * IllegalArgumentException on a negative page or a size below 1, which nothing here
      * handles specially — it would come back as a 500 for what's really just a malformed
      * query string (a stale bookmark, a hand-edited URL). Clamped rather than rejected, the
-     * same forgiving posture resolveSort() takes on an unknown sort value. */
+     * same forgiving posture resolveSortMode() takes on an unknown sort value. */
     @Test
     void browsePublishedClampsNegativePageAndSizeInsteadOfBlowingUp() {
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 1, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(page);
+        stubBrowseReturns(pageOf(List.of(), 1));
 
         service.browsePublished(null, null, null, null, null, null, null, "newest", -3, -20);
 
         verify(experienceRepository).browsePublished(
-                eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(PageRequest.of(0, 1, NEWEST_SORT)));
+                eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(null),
+                eq(SIMILARITY_THRESHOLD), eq("newest"), eq(PageRequest.of(0, 1)));
     }
 
     @Test
     void browsePublishedClampsAZeroSizeToOne() {
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 1, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), any()))
-                .thenReturn(page);
+        stubBrowseReturns(pageOf(List.of(), 1));
 
         service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 0);
 
         verify(experienceRepository).browsePublished(
-                eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(PageRequest.of(0, 1, NEWEST_SORT)));
+                eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(null),
+                eq(SIMILARITY_THRESHOLD), eq("newest"), eq(PageRequest.of(0, 1)));
     }
 
     @Test
-    void browsePublishedTreatsBlankFiltersAsNull() {
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), any()))
-                .thenReturn(page);
+    void browsePublishedTreatsBlankAndPunctuationOnlyFiltersAsNull() {
+        stubBrowseReturns(pageOf(List.of(), 20));
 
-        service.browsePublished(null, "  ", "", null, null, null, "  ", "newest", 0, 20);
+        // Blank/whitespace ("  ", "") and punctuation-only ("  -  ") filters normalize to
+        // nothing and become null, so the query takes each IS NULL branch rather than matching
+        // on an empty pattern. A blank search collapses all three search params to null too.
+        service.browsePublished(null, "  ", "", "  -  ", null, null, "  ", "newest", 0, 20);
 
-        verify(experienceRepository).browsePublished(eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), any());
+        verify(experienceRepository).browsePublished(
+                eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(null), eq(null),
+                eq(SIMILARITY_THRESHOLD), eq("newest"), any());
     }
 
     @Test
-    void browsePublishedBuildsALowercasedWildcardSearchPattern() {
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), any())).thenReturn(page);
+    void browsePublishedNormalizesFilterValuesToPunctuationInsensitiveContainsPatterns() {
+        stubBrowseReturns(pageOf(List.of(), 20));
+
+        service.browsePublished(null, "Acme Corp", "Backend Engineer", "SDE-3", null, null, null, "newest", 0, 20);
+
+        // Tier 1: each filter is lower-cased, stripped to alphanumerics, and wrapped as a
+        // contains pattern — so "SDE-3" is queried as "%sde3%" and matches "SDE 3"/"sde3".
+        verify(experienceRepository).browsePublished(
+                eq("%acmecorp%"), eq("%backendengineer%"), eq("%sde3%"),
+                eq(null), eq(null), eq(null), eq(null), eq(null),
+                eq(SIMILARITY_THRESHOLD), eq("newest"), any());
+    }
+
+    @Test
+    void browsePublishedBuildsNormalizedAndSubstringSearchParams() {
+        stubBrowseReturns(pageOf(List.of(), 20));
 
         service.browsePublished(null, null, null, null, null, null, "Backend Eng", "newest", 0, 20);
 
+        // Tier 2: searchTerm is the lowered raw form (for similarity()), searchContains is the
+        // normalized contains (for the company/role normalized columns), searchLike is a
+        // lowered substring (for the teaser).
         verify(experienceRepository).browsePublished(
-                eq(null), eq(null), eq(null), eq(null), eq(null), eq("%backend eng%"), any());
+                eq(null), eq(null), eq(null), eq(null), eq(null),
+                eq("backend eng"), eq("%backendeng%"), eq("%backend eng%"),
+                eq(SIMILARITY_THRESHOLD), eq("newest"), any());
     }
 
     @Test
     void browsePublishedPassesTheIsFreeFilterThrough() {
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), any())).thenReturn(page);
+        stubBrowseReturns(pageOf(List.of(), 20));
 
         service.browsePublished(null, null, null, null, null, Boolean.TRUE, null, "newest", 0, 20);
 
         verify(experienceRepository).browsePublished(
-                eq(null), eq(null), eq(null), eq(null), eq(Boolean.TRUE), eq(null), any());
+                eq(null), eq(null), eq(null), eq(null), eq(Boolean.TRUE), eq(null), eq(null), eq(null),
+                eq(SIMILARITY_THRESHOLD), eq("newest"), any());
     }
 
     @Test
-    void browsePublishedSortsByPriceLowWhenRequested() {
-        Sort priceLowSort = Sort.by(Sort.Direction.ASC, "pricePaise");
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, priceLowSort), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceLowSort))))
-                .thenReturn(page);
+    void browsePublishedMapsPriceLowSortToItsSortMode() {
+        stubBrowseReturns(pageOf(List.of(), 20));
 
         service.browsePublished(null, null, null, null, null, null, null, "priceLow", 0, 20);
 
-        verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceLowSort)));
+        verify(experienceRepository).browsePublished(
+                any(), any(), any(), any(), any(), any(), any(), any(),
+                org.mockito.ArgumentMatchers.anyDouble(), eq("priceLow"), any());
     }
 
     @Test
-    void browsePublishedSortsByPriceHighWhenRequested() {
-        Sort priceHighSort = Sort.by(Sort.Direction.DESC, "pricePaise");
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, priceHighSort), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceHighSort))))
-                .thenReturn(page);
+    void browsePublishedMapsPriceHighSortToItsSortMode() {
+        stubBrowseReturns(pageOf(List.of(), 20));
 
         service.browsePublished(null, null, null, null, null, null, null, "priceHigh", 0, 20);
 
-        verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, priceHighSort)));
+        verify(experienceRepository).browsePublished(
+                any(), any(), any(), any(), any(), any(), any(), any(),
+                org.mockito.ArgumentMatchers.anyDouble(), eq("priceHigh"), any());
     }
 
     @Test
-    void browsePublishedSortsByMostViewedWhenRequested() {
-        // publishedAt DESC is the tiebreak — see resolveSort's Javadoc — for experiences
-        // tied on viewCount, most commonly a bunch of untouched zeros.
-        Sort mostViewedSort = Sort.by(Sort.Direction.DESC, "viewCount").and(Sort.by(Sort.Direction.DESC, "publishedAt"));
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, mostViewedSort), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, mostViewedSort))))
-                .thenReturn(page);
+    void browsePublishedMapsMostViewedSortToItsSortMode() {
+        stubBrowseReturns(pageOf(List.of(), 20));
 
         service.browsePublished(null, null, null, null, null, null, null, "mostViewed", 0, 20);
 
-        verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, mostViewedSort)));
+        verify(experienceRepository).browsePublished(
+                any(), any(), any(), any(), any(), any(), any(), any(),
+                org.mockito.ArgumentMatchers.anyDouble(), eq("mostViewed"), any());
     }
 
     @Test
-    void browsePublishedFallsBackToNewestForAnUnrecognizedSortValue() {
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, NEWEST_SORT))))
-                .thenReturn(page);
+    void browsePublishedFallsBackToNewestSortModeForAnUnrecognizedSortValue() {
+        stubBrowseReturns(pageOf(List.of(), 20));
 
         service.browsePublished(null, null, null, null, null, null, null, "bogus", 0, 20);
 
-        verify(experienceRepository).browsePublished(any(), any(), any(), any(), any(), any(), eq(PageRequest.of(0, 20, NEWEST_SORT)));
+        verify(experienceRepository).browsePublished(
+                any(), any(), any(), any(), any(), any(), any(), any(),
+                org.mockito.ArgumentMatchers.anyDouble(), eq("newest"), any());
     }
 
     @Test
@@ -1178,9 +1201,7 @@ class ExperienceServiceTest {
         Experience experience = draftOwnedByContributor();
         experience.markPendingReview();
         experience.publish();
-        Page<Experience> page = new PageImpl<>(List.of(experience), PageRequest.of(0, 20, NEWEST_SORT), 1);
-        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
-                .thenReturn(page);
+        stubBrowseReturns(pageOf(List.of(experience), 20));
 
         var response = service.browsePublished(null, null, null, null, null, null, null, "newest", 0, 20);
 
@@ -1197,9 +1218,7 @@ class ExperienceServiceTest {
         locked.markPendingReview();
         locked.publish();
         UUID viewerId = UUID.randomUUID();
-        Page<Experience> page = new PageImpl<>(List.of(unlocked, locked), PageRequest.of(0, 20, NEWEST_SORT), 2);
-        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
-                .thenReturn(page);
+        stubBrowseReturns(pageOf(List.of(unlocked, locked), 20));
         when(entitlementRepository.findExperienceIdsByUserIdAndExperienceIdIn(
                         eq(viewerId), eq(List.of(unlocked.getId(), locked.getId()))))
                 .thenReturn(List.of(unlocked.getId()));
@@ -1212,9 +1231,7 @@ class ExperienceServiceTest {
 
     @Test
     void browsePublishedSkipsEntitlementQueryForAnEmptyPage() {
-        Page<Experience> page = new PageImpl<>(List.of(), PageRequest.of(0, 20, NEWEST_SORT), 0);
-        when(experienceRepository.browsePublished(null, null, null, null, null, null, PageRequest.of(0, 20, NEWEST_SORT)))
-                .thenReturn(page);
+        stubBrowseReturns(pageOf(List.of(), 20));
 
         service.browsePublished(UUID.randomUUID(), null, null, null, null, null, null, "newest", 0, 20);
 

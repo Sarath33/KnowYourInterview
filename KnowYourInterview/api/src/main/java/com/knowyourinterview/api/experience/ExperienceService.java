@@ -52,6 +52,8 @@ public class ExperienceService {
     private final EmailVerificationGuard emailVerificationGuard;
     private final int defaultPricePaise;
     private final int maxPageSize;
+    private final double searchSimilarityThreshold;
+    private final double suggestionSimilarityThreshold;
 
     /** Proof documents are offer letters / interview invites — PDFs and photos of physical
      * documents cover the real-world cases. Anything else (executables, scripts, archives)
@@ -73,7 +75,9 @@ public class ExperienceService {
             ExperienceViewRepository experienceViewRepository,
             EmailVerificationGuard emailVerificationGuard,
             @Value("${app.pricing.default-price-paise}") int defaultPricePaise,
-            @Value("${app.pagination.max-page-size:100}") int maxPageSize) {
+            @Value("${app.pagination.max-page-size:100}") int maxPageSize,
+            @Value("${app.search.similarity-threshold:0.3}") double searchSimilarityThreshold,
+            @Value("${app.search.suggestion-threshold:0.15}") double suggestionSimilarityThreshold) {
         this.experienceRepository = experienceRepository;
         this.roundRepository = roundRepository;
         this.proofDocumentRepository = proofDocumentRepository;
@@ -87,6 +91,8 @@ public class ExperienceService {
         this.emailVerificationGuard = emailVerificationGuard;
         this.defaultPricePaise = defaultPricePaise;
         this.maxPageSize = maxPageSize;
+        this.searchSimilarityThreshold = searchSimilarityThreshold;
+        this.suggestionSimilarityThreshold = suggestionSimilarityThreshold;
     }
 
     /**
@@ -400,16 +406,77 @@ public class ExperienceService {
         // IllegalArgumentException on a negative page or a size below 1, which the catch-all
         // exception handler would turn into a 500 for what is really a malformed request.
         // Clamping instead of rejecting keeps a stale bookmark or a hand-edited query string
-        // from erroring at all — same forgiving posture resolveSort() takes on a sort value
-        // it doesn't recognise.
+        // from erroring at all — same forgiving posture resolveSortMode() takes on a sort
+        // value it doesn't recognise.
         int safePage = Math.max(0, page);
         int safeSize = Math.min(Math.max(1, size), maxPageSize);
+        // Tier 1: filters are a normalized "contains" — strip non-alphanumerics + lowercase
+        // on the query input here (the stored side is the V15 generated columns), so "SDE3"
+        // matches "SDE-3" and "SDE" matches every SDE level.
+        String companyPat = containsPattern(normalize(company));
+        String rolePat = containsPattern(normalize(roleTitle));
+        String levelPat = containsPattern(normalize(level));
+        // Tier 2: three shapes of the same search string. searchTerm is the raw-ish lowered
+        // form for similarity(); searchContains is the normalized form for the normalized
+        // columns; searchLike is a plain lowered substring for the teaser.
+        String searchTerm = lowerTrimToNull(search);
+        String searchContains = containsPattern(normalize(search));
+        String searchLike = searchTerm == null ? null : "%" + searchTerm + "%";
+        // ORDER BY now lives inside the native query (relevance ranking can't be a Sort), so
+        // the sort intent rides along as sortMode and the PageRequest is unsorted.
         Page<Experience> result = experienceRepository.browsePublished(
-                blankToNull(company), blankToNull(roleTitle), blankToNull(level), year, isFree, searchPattern(search),
-                PageRequest.of(safePage, safeSize, resolveSort(sort)));
-        List<UUID> ids = result.getContent().stream().map(Experience::getId).toList();
+                companyPat, rolePat, levelPat, year, isFree,
+                searchTerm, searchContains, searchLike,
+                searchSimilarityThreshold, resolveSortMode(sort),
+                PageRequest.of(safePage, safeSize, Sort.unsorted()));
+        // Teaser assembly (round counts + unlocked flags) is shared with suggest() — see
+        // toTeasers. Page metadata is carried over verbatim so the response is byte-for-byte
+        // what result.map(...) wrapped in PagedResponse.of used to produce.
+        List<ExperienceTeaserResponse> items = toTeasers(viewerId, result.getContent());
+        return new PagedResponse<>(
+                items, result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
+    }
+
+    /**
+     * "Did you mean" fallback — the frontend calls this when a strict browse returns zero
+     * results. Returns the published experiences most similar to {@code q}, ranked by
+     * relevance, DELIBERATELY ignoring the company/role/level/year/isFree filters (those are
+     * exactly what just matched nothing). Public like browse: {@code viewerId} is the
+     * signed-in caller (or null for a guest), used only to flag {@code unlocked} on the
+     * teasers — never to gate visibility.
+     * <p>
+     * A blank query short-circuits to an empty list with no DB round trip. Otherwise it builds
+     * the same three shapes of the query string browsePublished's Tier 2 uses — the raw lowered
+     * term for similarity(), the normalized "contains" form for the generated columns, and a
+     * plain lowered substring for the teaser — and ranks by the best similarity across
+     * company/role/teaser. The threshold is generously low (app.search.suggestion-threshold,
+     * default 0.15, below the 0.3 search cutoff) so near-misses still surface. {@code limit} is
+     * clamped to 1..12 (the controller supplies the default of 6).
+     */
+    @Transactional(readOnly = true)
+    public List<ExperienceTeaserResponse> suggest(UUID viewerId, String q, int limit) {
+        String qTerm = lowerTrimToNull(q);
+        if (qTerm == null) {
+            return List.of();
+        }
+        String qContains = containsPattern(normalize(q));
+        String qLike = "%" + qTerm + "%";
+        int safeLimit = Math.min(Math.max(1, limit), 12);
+        List<Experience> matches = experienceRepository.suggestPublished(
+                qContains, qLike, qTerm, suggestionSimilarityThreshold, safeLimit);
+        return toTeasers(viewerId, matches);
+    }
+
+    /**
+     * Turns a batch of experiences into teasers, sharing one round-count query and one
+     * entitlement lookup across the whole batch instead of per row — used by both
+     * browsePublished and suggest so the mapping (round counts + unlocked flags) lives in
+     * exactly one place. Order in equals order out.
+     */
+    private List<ExperienceTeaserResponse> toTeasers(UUID viewerId, List<Experience> experiences) {
+        List<UUID> ids = experiences.stream().map(Experience::getId).toList();
         // An empty IN (...) list is invalid JPQL for most providers — skip the query(ies)
-        // entirely for an empty page instead of sending a zero-length list.
+        // entirely for an empty batch instead of sending a zero-length list.
         Map<UUID, Long> roundCounts = ids.isEmpty()
                 ? Map.of()
                 : roundRepository.countByExperienceIdIn(ids).stream()
@@ -420,9 +487,10 @@ public class ExperienceService {
         Set<UUID> unlockedIds = (viewerId == null || ids.isEmpty())
                 ? Set.of()
                 : new HashSet<>(entitlementRepository.findExperienceIdsByUserIdAndExperienceIdIn(viewerId, ids));
-        return PagedResponse.of(
-                result.map(e -> ExperienceTeaserResponse.from(
-                        e, roundCounts.getOrDefault(e.getId(), 0L), unlockedIds.contains(e.getId()) || e.isFree())));
+        return experiences.stream()
+                .map(e -> ExperienceTeaserResponse.from(
+                        e, roundCounts.getOrDefault(e.getId(), 0L), unlockedIds.contains(e.getId()) || e.isFree()))
+                .toList();
     }
 
     /**
@@ -660,29 +728,47 @@ public class ExperienceService {
         return (s == null || s.isBlank()) ? null : s;
     }
 
-    /** Builds the LIKE pattern the repository query expects, or null for "no search" —
-     * wildcards and lowercasing happen here so the JPQL only has to do a plain LIKE. */
-    private static String searchPattern(String search) {
-        String trimmed = blankToNull(search);
-        return trimmed == null ? null : "%" + trimmed.toLowerCase() + "%";
+    /** Collapses a filter/search value to its normalized form — lower-cased with every
+     * non-alphanumeric stripped — or null for "no value". Mirrors the V15 generated columns
+     * (company_normalized etc.) exactly, so "SDE-3", "SDE 3" and "sde3" all become "sde3".
+     * Returns null (not "") when nothing alphanumeric survives, so a filter of only
+     * punctuation is treated as absent rather than matching everything. */
+    private static String normalize(String value) {
+        String trimmed = blankToNull(value);
+        if (trimmed == null) {
+            return null;
+        }
+        String normalized = trimmed.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        return normalized.isEmpty() ? null : normalized;
     }
 
-    /** "newest" (default/unrecognized value) sorts by publishedAt descending; priceLow/
-     * priceHigh sort by price; "mostViewed" sorts by the one-per-user view count (see
-     * Experience#viewCount / ExperienceView) descending, publishedAt descending as the
-     * tiebreak for experiences tied on views (most commonly a bunch of untouched 0s).
-     * Falling back silently on an unrecognized value rather than throwing keeps a stale/
-     * bookmarked "sort=" query param from breaking the page. */
-    private static Sort resolveSort(String sort) {
+    /** Wraps an already-normalized value in LIKE wildcards for a "contains" match, or null. */
+    private static String containsPattern(String normalized) {
+        return normalized == null ? null : "%" + normalized + "%";
+    }
+
+    /** Lower-cased, trimmed search string (punctuation intact) for pg_trgm similarity(), or
+     * null for "no search". */
+    private static String lowerTrimToNull(String value) {
+        String trimmed = blankToNull(value);
+        return trimmed == null ? null : trimmed.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** Maps the public {@code sort} query param to the {@code :sortMode} the native browse
+     * query understands: priceLow/priceHigh sort by price, mostViewed by the one-per-user
+     * view count (publishedAt descending as the in-SQL tiebreak), and anything else —
+     * including "newest" and any stale/bookmarked value — falls back to publishedAt
+     * descending. Silent fallback keeps an unrecognized sort from breaking the page. */
+    private static String resolveSortMode(String sort) {
         if ("priceLow".equals(sort)) {
-            return Sort.by(Sort.Direction.ASC, "pricePaise");
+            return "priceLow";
         }
         if ("priceHigh".equals(sort)) {
-            return Sort.by(Sort.Direction.DESC, "pricePaise");
+            return "priceHigh";
         }
         if ("mostViewed".equals(sort)) {
-            return Sort.by(Sort.Direction.DESC, "viewCount").and(Sort.by(Sort.Direction.DESC, "publishedAt"));
+            return "mostViewed";
         }
-        return Sort.by(Sort.Direction.DESC, "publishedAt");
+        return "newest";
     }
 }

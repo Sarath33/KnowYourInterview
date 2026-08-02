@@ -154,6 +154,25 @@ public class ExperienceController {
                 viewerId, company, roleTitle, level, year, isFree, search, sort, page, size);
     }
 
+    /**
+     * "Did you mean" fallback the web app fires when a strict browse returns zero results —
+     * the published experiences most similar to {@code q}, ranked by relevance, ignoring the
+     * strict company/role/level/year filters. Public exactly like browse: the principal is
+     * nullable, so a guest gets {@code viewerId == null} and a signed-in caller still gets
+     * their {@code unlocked} flags. {@code limit} defaults to 6 and is clamped to 1..12 in the
+     * service. The literal {@code /suggestions} path takes precedence over the {@code /{id}}
+     * template below (Spring ranks a literal segment above a path variable), same as
+     * {@code /mine} does — so this never collides with getOne.
+     */
+    @GetMapping("/suggestions")
+    public List<ExperienceTeaserResponse> suggestions(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false, defaultValue = "6") int limit) {
+        UUID viewerId = user == null ? null : user.id();
+        return experienceService.suggest(viewerId, q, limit);
+    }
+
     @GetMapping("/{id}")
     public ExperienceViewResponse getOne(
             @AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID id) {

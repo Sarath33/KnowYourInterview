@@ -358,6 +358,14 @@ export async function getExperience(id: string): Promise<ExperienceView> {
   return request(`/api/v1/experiences/${id}`);
 }
 
+// Fallback "did you mean" suggestions: the closest published experiences to a free-text
+// query, ranked by trigram similarity and ignoring the strict filters. Used by Browse when
+// the filtered/searched result comes back empty.
+export async function getSearchSuggestions(q: string, limit = 6): Promise<ExperienceTeaser[]> {
+  const query = new URLSearchParams({ q, limit: String(limit) });
+  return request(`/api/v1/experiences/suggestions?${query.toString()}`);
+}
+
 /**
  * Opens a proof document in a new tab. A plain <a href> can't carry the
  * Authorization header the endpoint requires (owner-or-admin gated), so this
