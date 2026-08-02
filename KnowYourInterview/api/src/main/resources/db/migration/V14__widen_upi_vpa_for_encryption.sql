@@ -1,0 +1,12 @@
+-- Widen payout_accounts.upi_vpa to hold the encrypted-at-rest form of the UPI VPA.
+--
+-- The VPA is now stored AES-256-GCM-encrypted and base64-encoded, as a self-describing token
+-- "enc:v1:" + base64(iv || ciphertext||tag) (see AesGcmEncryptor). That ciphertext token is
+-- materially longer than the plaintext VPA the column was originally sized for (VARCHAR(255) in
+-- V13), so the column is widened to VARCHAR(512) to leave comfortable headroom.
+--
+-- Existing plaintext rows are left untouched: AesGcmEncryptor.decrypt treats any value without
+-- the "enc:v1:" prefix as legacy plaintext and returns it unchanged, and each row is upgraded to
+-- ciphertext the next time it is saved. The column stays nullable (a payout row can exist with no
+-- VPA on file yet).
+ALTER TABLE payout_accounts ALTER COLUMN upi_vpa TYPE VARCHAR(512);

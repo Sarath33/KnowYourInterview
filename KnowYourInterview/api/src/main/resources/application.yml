@@ -129,6 +129,15 @@ app:
     secret: ${JWT_SECRET:dev-only-change-me-0123456789abcdef0123456789abcdef}
     access-token-ttl-minutes: 15
     refresh-token-ttl-days: 30
+  crypto:
+    # AES-256-GCM key for encrypting the payout UPI VPA at rest (see AesGcmEncryptor). The value
+    # below is a local-dev-only default: base64 of a fixed, well-known 32-byte value that is
+    # committed to source control, so it is NOT a secret — it only keeps local/dev/test working
+    # with no config. Override with the PAYOUT_ENC_KEY env var in prod; it must be a base64-encoded
+    # 32-byte key. ProdSecretGuard fails startup under the 'prod' profile if this default is still
+    # in place. Rotating this key makes existing ciphertext unreadable — the "v1" token prefix is
+    # the seam left in place for a future key-versioned rotation that could keep old rows readable.
+    payout-key: ${PAYOUT_ENC_KEY:ZGV2LW9ubHktcGF5b3V0LWtleS1ub3QtZm9yLXByb2Q=}
   password-reset:
     token-ttl-minutes: 60
   email-verification:

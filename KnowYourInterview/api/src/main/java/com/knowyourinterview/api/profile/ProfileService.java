@@ -13,6 +13,7 @@ import com.knowyourinterview.api.auth.InvalidCredentialsException;
 import com.knowyourinterview.api.auth.dto.MessageResponse;
 import com.knowyourinterview.api.auth.dto.UserResponse;
 import com.knowyourinterview.api.common.NotFoundException;
+import com.knowyourinterview.api.common.crypto.AesGcmEncryptor;
 import com.knowyourinterview.api.experience.ExperienceRepository;
 import com.knowyourinterview.api.payment.EntitlementRepository;
 import com.knowyourinterview.api.payout.Payout;
@@ -43,6 +44,7 @@ public class ProfileService {
     private final EntitlementRepository entitlementRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailVerificationService emailVerificationService;
+    private final AesGcmEncryptor encryptor;
 
     public ProfileService(
             UserRepository userRepository,
@@ -51,7 +53,8 @@ public class ProfileService {
             ExperienceRepository experienceRepository,
             EntitlementRepository entitlementRepository,
             PasswordEncoder passwordEncoder,
-            EmailVerificationService emailVerificationService) {
+            EmailVerificationService emailVerificationService,
+            AesGcmEncryptor encryptor) {
         this.userRepository = userRepository;
         this.payoutAccountRepository = payoutAccountRepository;
         this.payoutRepository = payoutRepository;
@@ -59,6 +62,7 @@ public class ProfileService {
         this.entitlementRepository = entitlementRepository;
         this.passwordEncoder = passwordEncoder;
         this.emailVerificationService = emailVerificationService;
+        this.encryptor = encryptor;
     }
 
     @Transactional(readOnly = true)
@@ -66,7 +70,7 @@ public class ProfileService {
         User user = requireUser(userId);
 
         PayoutAccountResponse payoutAccount = payoutAccountRepository.findByUserId(userId)
-                .map(PayoutAccountResponse::from)
+                .map(this::toResponse)
                 .orElse(null);
 
         long totalEarnedPaise =
@@ -142,18 +146,33 @@ public class ProfileService {
         return new MessageResponse("Password updated.");
     }
 
-    /** Full-replace upsert of the single payout row for this user (user_id is UNIQUE). */
+    /**
+     * Full-replace upsert of the single payout row for this user (user_id is UNIQUE). The VPA is
+     * normalized (trimmed + lowercased — VPAs are case-insensitive) and stored encrypted at rest
+     * via {@link AesGcmEncryptor}; the account holder name is trimmed but keeps its original case.
+     * The returned response carries the plaintext VPA so the API contract is unchanged.
+     */
     @Transactional
     public PayoutAccountResponse upsertPayoutAccount(UUID userId, String accountHolderName, String upiVpa) {
         requireUser(userId);
+        String normalizedName = accountHolderName == null ? null : accountHolderName.trim();
+        String normalizedVpa = upiVpa == null ? null : upiVpa.trim().toLowerCase();
+        String encryptedVpa = encryptor.encrypt(normalizedVpa);
+
         PayoutAccount account = payoutAccountRepository.findByUserId(userId).orElse(null);
         if (account == null) {
-            account = new PayoutAccount(UUID.randomUUID(), userId, accountHolderName, upiVpa);
+            account = new PayoutAccount(UUID.randomUUID(), userId, normalizedName, encryptedVpa);
         } else {
-            account.update(accountHolderName, upiVpa);
+            account.update(normalizedName, encryptedVpa);
         }
         payoutAccountRepository.save(account);
-        return PayoutAccountResponse.from(account);
+        // Build the response from the known plaintext rather than re-decrypting what we just stored.
+        return new PayoutAccountResponse(normalizedName, normalizedVpa);
+    }
+
+    /** Maps a stored payout row to its response, decrypting the at-rest VPA back to plaintext. */
+    private PayoutAccountResponse toResponse(PayoutAccount account) {
+        return new PayoutAccountResponse(account.getAccountHolderName(), encryptor.decrypt(account.getUpiVpa()));
     }
 
     /**

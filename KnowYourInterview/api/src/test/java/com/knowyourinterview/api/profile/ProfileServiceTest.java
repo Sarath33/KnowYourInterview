@@ -16,6 +16,7 @@ import com.knowyourinterview.api.auth.EmailAlreadyRegisteredException;
 import com.knowyourinterview.api.auth.EmailVerificationService;
 import com.knowyourinterview.api.auth.InvalidCredentialsException;
 import com.knowyourinterview.api.auth.dto.UserResponse;
+import com.knowyourinterview.api.common.crypto.AesGcmEncryptor;
 import com.knowyourinterview.api.experience.ExperienceRepository;
 import com.knowyourinterview.api.payment.EntitlementRepository;
 import com.knowyourinterview.api.payout.Payout;
@@ -58,6 +59,11 @@ class ProfileServiceTest {
     @Mock
     private EmailVerificationService emailVerificationService;
 
+    // Not a mock: the encryptor is deterministic to round-trip, so a real one with the dev key
+    // lets the tests exercise the actual encrypt-on-write / decrypt-on-read path.
+    private final AesGcmEncryptor encryptor =
+            new AesGcmEncryptor("ZGV2LW9ubHktcGF5b3V0LWtleS1ub3QtZm9yLXByb2Q=");
+
     private ProfileService profileService;
 
     @BeforeEach
@@ -69,7 +75,8 @@ class ProfileServiceTest {
                 experienceRepository,
                 entitlementRepository,
                 passwordEncoder,
-                emailVerificationService);
+                emailVerificationService,
+                encryptor);
     }
 
     private User passwordUser() {
@@ -243,6 +250,7 @@ class ProfileServiceTest {
         PayoutAccountResponse response =
                 profileService.upsertPayoutAccount(user.getId(), "Jane Doe", "jane@upi");
 
+        // The response still carries the plaintext VPA — the API contract is unchanged.
         assertThat(response.accountHolderName()).isEqualTo("Jane Doe");
         assertThat(response.upiVpa()).isEqualTo("jane@upi");
 
@@ -250,7 +258,29 @@ class ProfileServiceTest {
         verify(payoutAccountRepository).save(captor.capture());
         assertThat(captor.getValue().getUserId()).isEqualTo(user.getId());
         assertThat(captor.getValue().getAccountHolderName()).isEqualTo("Jane Doe");
-        assertThat(captor.getValue().getUpiVpa()).isEqualTo("jane@upi");
+        // The VPA is persisted encrypted (enc:v1:...), not as plaintext, and decrypts back.
+        assertThat(captor.getValue().getUpiVpa()).startsWith("enc:v1:");
+        assertThat(captor.getValue().getUpiVpa()).isNotEqualTo("jane@upi");
+        assertThat(encryptor.decrypt(captor.getValue().getUpiVpa())).isEqualTo("jane@upi");
+    }
+
+    @Test
+    void upsertPayoutAccountTrimsAndLowercasesTheVpaBeforeEncrypting() {
+        User user = passwordUser();
+        when(userRepository.findById(user.getId())).thenReturn(Optional.of(user));
+        when(payoutAccountRepository.findByUserId(user.getId())).thenReturn(Optional.empty());
+
+        PayoutAccountResponse response =
+                profileService.upsertPayoutAccount(user.getId(), "  Jane Doe  ", "  Jane@OkAxis  ");
+
+        // Name is trimmed but keeps its case; VPA is trimmed and lowercased (VPAs are case-insensitive).
+        assertThat(response.accountHolderName()).isEqualTo("Jane Doe");
+        assertThat(response.upiVpa()).isEqualTo("jane@okaxis");
+
+        ArgumentCaptor<PayoutAccount> captor = ArgumentCaptor.forClass(PayoutAccount.class);
+        verify(payoutAccountRepository).save(captor.capture());
+        assertThat(captor.getValue().getAccountHolderName()).isEqualTo("Jane Doe");
+        assertThat(encryptor.decrypt(captor.getValue().getUpiVpa())).isEqualTo("jane@okaxis");
     }
 
     @Test
@@ -266,7 +296,9 @@ class ProfileServiceTest {
         assertThat(response.accountHolderName()).isEqualTo("New Name");
         assertThat(response.upiVpa()).isEqualTo("new@upi");
         assertThat(existing.getAccountHolderName()).isEqualTo("New Name");
-        assertThat(existing.getUpiVpa()).isEqualTo("new@upi");
+        // Updated in place with the encrypted VPA, which decrypts back to the new plaintext.
+        assertThat(existing.getUpiVpa()).startsWith("enc:v1:");
+        assertThat(encryptor.decrypt(existing.getUpiVpa())).isEqualTo("new@upi");
         verify(payoutAccountRepository).save(existing);
     }
 

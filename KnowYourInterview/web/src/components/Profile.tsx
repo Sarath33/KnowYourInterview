@@ -277,6 +277,9 @@ function ChangePasswordForm({ profile }: { profile: ProfileResponse }) {
   );
 }
 
+// Mirrors the server-side @Pattern on UpsertPayoutAccountRequest: handle@psp.
+const VPA_PATTERN = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,63}$/;
+
 function PayoutForm({ profile, onSaved }: { profile: ProfileResponse; onSaved: () => Promise<void> }) {
   const [accountHolderName, setAccountHolderName] = useState(profile.payoutAccount?.accountHolderName ?? "");
   const [upiVpa, setUpiVpa] = useState(profile.payoutAccount?.upiVpa ?? "");
@@ -286,11 +289,19 @@ function PayoutForm({ profile, onSaved }: { profile: ProfileResponse; onSaved: (
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // VPAs are case-insensitive; normalize to match how the server stores them. Mirrors the
+    // server-side @Pattern so an obvious typo is caught before a round-trip.
+    const normalizedVpa = upiVpa.trim().toLowerCase();
+    if (!VPA_PATTERN.test(normalizedVpa)) {
+      setSuccess(null);
+      setError("Enter a valid UPI ID, e.g. name@bank.");
+      return;
+    }
     setBusy(true);
     setError(null);
     setSuccess(null);
     try {
-      await api.savePayoutAccount({ accountHolderName: accountHolderName.trim(), upiVpa: upiVpa.trim() });
+      await api.savePayoutAccount({ accountHolderName: accountHolderName.trim(), upiVpa: normalizedVpa });
       await onSaved();
       setSuccess("Payout details saved.");
     } catch (err) {
@@ -321,6 +332,10 @@ function PayoutForm({ profile, onSaved }: { profile: ProfileResponse; onSaved: (
             value={upiVpa}
             onChange={(e) => setUpiVpa(e.target.value)}
             placeholder="name@bank"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            inputMode="email"
             required
           />
           <p className="field-hint">Used for manual payouts when one of your experiences earns a flat fee.</p>

@@ -29,7 +29,9 @@ public class PayoutAccount {
     @Column(name = "account_holder_name", nullable = false)
     private String accountHolderName;
 
-    @Column(name = "upi_vpa")
+    // Widened to 512 (see V14) because the value is stored AES-GCM-encrypted and base64-encoded
+    // ("enc:v1:..."), which is materially longer than the plaintext VPA. Still nullable.
+    @Column(name = "upi_vpa", length = 512)
     private String upiVpa;
 
     @Column(name = "created_at", nullable = false)
