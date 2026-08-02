@@ -52,6 +52,13 @@ public class User {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    // Set the moment the account is self-deleted (see anonymizeForDeletion). Null for every
+    // live account. A non-null value is a tombstone: AuthService.login and refresh both reject
+    // such a user, so the row is retained (for the FK integrity of their past experiences and
+    // payouts) without ever being usable to sign in again.
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
     protected User() {
         // JPA
     }
@@ -142,5 +149,41 @@ public class User {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Instant getDeletedAt() {
+        return deletedAt;
+    }
+
+    /** Changes the account's display name. Nothing else moves — this is a cosmetic edit. */
+    public void rename(String displayName) {
+        this.displayName = displayName;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Points the account at a new address and drops it back to unverified, so the same
+     * confirmation flow a fresh registration goes through has to be repeated for the new
+     * inbox before anything gated on emailVerified (submitting, purchasing) works again. The
+     * caller is expected to re-issue a confirmation code to the new address right after. */
+    public void changeEmailPendingReverification(String newEmail) {
+        this.email = newEmail;
+        this.emailVerified = false;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Scrubs personally identifying data on self-deletion rather than physically removing the
+     * row — experiences, payouts and purchases reference users(id), so a hard DELETE would
+     * either cascade real content away or fail the FK. The email is rewritten to a unique,
+     * unroutable @deleted.invalid address so it collides with nothing and can never receive
+     * mail, both credentials are cleared, and deletedAt is stamped so login/refresh reject it. */
+    public void anonymizeForDeletion() {
+        this.email = "deleted-" + this.id + "@deleted.invalid";
+        this.displayName = "Deleted user";
+        this.passwordHash = null;
+        this.googleSub = null;
+        this.emailVerified = false;
+        Instant now = Instant.now();
+        this.deletedAt = now;
+        this.updatedAt = now;
     }
 }

@@ -15,6 +15,10 @@ public interface EntitlementRepository extends JpaRepository<Entitlement, UUID> 
 
     long countByExperienceId(UUID experienceId);
 
+    // Purchase count for the profile page — how many experiences this user has unlocked. One
+    // entitlement per unlocked experience (user_id + experience_id is UNIQUE, see V1).
+    long countByUserId(UUID userId);
+
     List<Entitlement> findByUserIdOrderByGrantedAtDesc(UUID userId);
 
     // Bulk "which of these experiences has this user already unlocked" lookup for Browse

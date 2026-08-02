@@ -240,10 +240,11 @@ export interface Entitlement {
   grantedAt: ISODateTime;
 }
 
+/** Where a contributor's manual payouts are sent. UPI-only for now (RazorpayX auto-transfer
+ * isn't wired up — see the Payout docs), so this is just the name + VPA an admin pays by hand. */
 export interface PayoutAccount {
-  id: UUID;
   accountHolderName: string;
-  hasRazorpayxFundAccount: boolean;
+  upiVpa: string;
 }
 
 export type PayoutStatus = "PENDING" | "PROCESSING" | "PAID" | "FAILED";
@@ -353,4 +354,46 @@ export interface ApiErrorBody {
   error: string;
   message: string;
   fieldErrors?: Record<string, string>;
+}
+
+// --- Profile / account ---
+
+/** The full account page payload. `hasPassword`/`hasGoogle` describe which sign-in methods
+ * are set up (a Google-only account has no password to change — it sets one instead), and
+ * the *Paise / *Count fields are read-only lifetime stats for the earnings summary. */
+export interface ProfileResponse {
+  user: User;
+  hasPassword: boolean;
+  hasGoogle: boolean;
+  payoutAccount: PayoutAccount | null;
+  totalEarnedPaise: number;
+  pendingPayoutPaise: number;
+  submissionCount: number;
+  purchaseCount: number;
+}
+
+export interface UpdateProfileRequest {
+  displayName: string;
+}
+
+export interface ChangeEmailRequest {
+  newEmail: string;
+}
+
+/** `currentPassword` is optional because a Google-only account has none to verify — it's
+ * setting a password for the first time. An account that already has one must supply it. */
+export interface ChangePasswordRequest {
+  currentPassword?: string;
+  newPassword: string;
+}
+
+export interface PayoutAccountRequest {
+  accountHolderName: string;
+  upiVpa: string;
+}
+
+/** `password` confirms a destructive delete for a password account; a Google-only account
+ * has none, so the UI confirms by typing DELETE instead and omits it. */
+export interface DeleteAccountRequest {
+  password?: string;
 }

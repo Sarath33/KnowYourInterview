@@ -97,6 +97,12 @@ public class AuthService {
     public AuthResponse login(String email, String rawPassword) {
         User user = userRepository.findByEmailIgnoreCase(email)
                 .orElseThrow(InvalidCredentialsException::new);
+        // Self-deleted accounts are anonymized but retained (see User#anonymizeForDeletion) —
+        // reject them here rather than let a tombstone log in. Same generic error as any other
+        // failed login, so it isn't an oracle for which addresses were deleted.
+        if (user.getDeletedAt() != null) {
+            throw new InvalidCredentialsException();
+        }
         // Google-only accounts have no password_hash — reject rather than NPE on matches().
         if (user.getPasswordHash() == null || !passwordEncoder.matches(rawPassword, user.getPasswordHash())) {
             throw new InvalidCredentialsException();
@@ -180,6 +186,12 @@ public class AuthService {
 
         User user = userRepository.findById(claims.userId())
                 .orElseThrow(() -> new InvalidTokenException("Account no longer exists"));
+        // A self-deleted account keeps its row but must not be able to rotate a still-live
+        // refresh token into a fresh session — this is what actually ends the sessions of a
+        // just-deleted user (there's no per-user Redis revoke; see ProfileService#deleteAccount).
+        if (user.getDeletedAt() != null) {
+            throw new InvalidTokenException("Account no longer exists");
+        }
         return issueTokens(user);
     }
 

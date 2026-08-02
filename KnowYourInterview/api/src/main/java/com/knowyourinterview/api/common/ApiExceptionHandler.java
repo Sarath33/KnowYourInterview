@@ -25,6 +25,7 @@ import com.knowyourinterview.api.auth.EmailNotVerifiedException;
 import com.knowyourinterview.api.auth.GoogleAuthNotConfiguredException;
 import com.knowyourinterview.api.auth.InvalidCredentialsException;
 import com.knowyourinterview.api.auth.InvalidTokenException;
+import com.knowyourinterview.api.profile.GoogleManagedEmailException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -73,6 +74,13 @@ public class ApiExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleAdminBootstrapNotConfigured(AdminBootstrapNotConfiguredException ex) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(body(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), null));
+    }
+
+    /** A Google-linked account tried to change an email it doesn't control here — 409, since
+     * it conflicts with the credential's own source of truth. Message is user-facing. */
+    @ExceptionHandler(GoogleManagedEmailException.class)
+    public ResponseEntity<Map<String, Object>> handleGoogleManagedEmail(GoogleManagedEmailException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body(HttpStatus.CONFLICT, ex.getMessage(), null));
     }
 
     @ExceptionHandler(NotFoundException.class)

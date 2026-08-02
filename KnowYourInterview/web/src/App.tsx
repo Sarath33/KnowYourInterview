@@ -14,6 +14,7 @@ import { ExperienceDetail } from "./components/ExperienceDetail";
 import { MyLibrary } from "./components/MyLibrary";
 import { MyPayouts } from "./components/MyPayouts";
 import { AdminPayouts } from "./components/AdminPayouts";
+import { Profile } from "./components/Profile";
 import { LogoMark, LogOutIcon } from "./components/icons";
 import "./App.css";
 
@@ -50,6 +51,7 @@ type Route =
   | { name: "library"; experienceId: string | null }
   | { name: "submissions" }
   | { name: "payouts" }
+  | { name: "profile" }
   | { name: "admin" }
   | { name: "adminPayouts" }
   | { name: "redirect"; to: string };
@@ -73,6 +75,7 @@ function parseRoute(pathname: string): Route {
   if (libraryMatch) return { name: "library", experienceId: libraryMatch[1] ?? null };
   if (pathname === "/submissions") return { name: "submissions" };
   if (pathname === "/payouts") return { name: "payouts" };
+  if (pathname === "/profile") return { name: "profile" };
   if (pathname === "/admin") return { name: "admin" };
   if (pathname === "/admin/payouts") return { name: "adminPayouts" };
   return { name: "redirect", to: "/browse" };
@@ -192,6 +195,12 @@ function AppContent() {
             <MyPayouts />
           </RequireAuth>
         );
+      case "profile":
+        return (
+          <RequireAuth>
+            <Profile />
+          </RequireAuth>
+        );
       case "admin":
         return (
           <RequireAdmin>
@@ -227,6 +236,7 @@ function AppContent() {
                 <NavTab label="Admin payouts" active={route.name === "adminPayouts"} onClick={() => navigate("/admin/payouts")} />
               </>
             )}
+            <NavTab label="Account" active={route.name === "profile"} onClick={() => navigate("/profile")} />
             <span className="nav-user">{user.displayName}</span>
             <button type="button" onClick={handleLogout} aria-label="Log out" className="icon-btn">
               <LogOutIcon />

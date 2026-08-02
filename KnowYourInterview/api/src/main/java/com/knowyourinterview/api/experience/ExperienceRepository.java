@@ -14,6 +14,10 @@ public interface ExperienceRepository extends JpaRepository<Experience, UUID> {
 
     List<Experience> findByContributorIdOrderByCreatedAtDesc(UUID contributorId);
 
+    // Submission count for the profile page — every experience this user has ever submitted,
+    // in any status (draft/pending/published/rejected), not just the published ones.
+    long countByContributorId(UUID contributorId);
+
     List<Experience> findByStatusOrderByCreatedAtAsc(ExperienceStatus status);
 
     // The CAST(:param AS string) on each nullable filter isn't decorative — Postgres plans

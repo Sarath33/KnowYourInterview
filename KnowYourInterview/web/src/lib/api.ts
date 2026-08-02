@@ -27,6 +27,14 @@ import type {
   Payout,
   PayoutAdminView,
   MarkPayoutPaidRequest,
+  ProfileResponse,
+  UpdateProfileRequest,
+  ChangeEmailRequest,
+  ChangePasswordRequest,
+  PayoutAccount,
+  PayoutAccountRequest,
+  DeleteAccountRequest,
+  User,
 } from "../../../shared/types";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
@@ -434,4 +442,51 @@ export async function adminMarkPayoutPaid(id: string, body: MarkPayoutPaidReques
 
 export async function listMyPayouts(): Promise<Payout[]> {
   return request("/api/v1/payouts/mine");
+}
+
+// --- Profile / account ---
+
+export async function getProfile(): Promise<ProfileResponse> {
+  return request("/api/v1/profile");
+}
+
+export async function updateDisplayName(body: UpdateProfileRequest): Promise<User> {
+  return request("/api/v1/profile", {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Kicks off an email change: the backend sends a verification link to the new address and
+ * only swaps it in once that's clicked, so the returned message is a "check your inbox", not
+ * a done. */
+export async function changeEmail(body: ChangeEmailRequest): Promise<MessageResponse> {
+  return request("/api/v1/profile/change-email", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** `currentPassword` is omitted for a Google-only account setting its first password. */
+export async function changePassword(body: ChangePasswordRequest): Promise<MessageResponse> {
+  return request("/api/v1/profile/change-password", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function savePayoutAccount(body: PayoutAccountRequest): Promise<PayoutAccount> {
+  return request("/api/v1/profile/payout-account", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+/** Irreversible. `password` confirms the delete for a password account; a Google-only account
+ * omits it (the UI confirms by typing DELETE instead). Returns 204. */
+export async function deleteAccount(body: DeleteAccountRequest): Promise<void> {
+  return request("/api/v1/profile", {
+    method: "DELETE",
+    body: JSON.stringify(body),
+  });
 }
