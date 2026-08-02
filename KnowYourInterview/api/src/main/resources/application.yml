@@ -98,6 +98,24 @@ management:
       enabled: true
     readinessstate:
       enabled: true
+    # Off, deliberately — and this one has bitten us, so it's worth the explanation.
+    #
+    # Adding spring-boot-starter-mail brings in Actuator's MailHealthIndicator, which is
+    # auto-registered whenever a JavaMailSender bean exists. That bean exists here even with
+    # no mail configured, because `spring.mail.host: ${MAIL_HOST:}` leaves the property
+    # present-but-empty and Spring Boot's mail auto-configuration only checks for presence.
+    # The indicator then opens an SMTP connection to a blank host on every health check, fails,
+    # and drags the aggregate /actuator/health to DOWN — which returns 503, which is exactly
+    # what Railway's healthcheck polls. Result: the app booted perfectly and every deploy was
+    # still marked FAILED.
+    #
+    # Disabling it is also right on the merits, independent of that bug. Email here is
+    # deliberately fire-and-forget: EmailSender swallows delivery failures so a mail hiccup
+    # can't fail a registration. Letting the same hiccup mark the whole API unhealthy — and on
+    # a platform that restarts or rolls back on a failed healthcheck, take the site down —
+    # contradicts that outright. The API is perfectly able to serve traffic with mail broken.
+    mail:
+      enabled: false
 
 app:
   # Where the web app is served from — used to build user-facing links that live in the

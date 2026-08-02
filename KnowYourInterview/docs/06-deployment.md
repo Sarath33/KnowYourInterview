@@ -117,6 +117,31 @@ accounts have no password).
 
 There's no DB browser for the raw `postgres:17-alpine` image service (Railway's built-in "Data" tab is a managed-Postgres-plugin feature, not available here). Promoted the first admin account by connecting to Postgres directly and running the same `UPDATE users SET is_admin = true WHERE email = '...'` from `04-handoff.md`'s local-dev instructions.
 
+## Healthcheck
+
+`api`'s healthcheck path is **`/actuator/health`** with a 300s timeout (see the service config).
+That's the *aggregate* endpoint, so **every registered health indicator can fail a deploy** —
+the app starting successfully isn't enough. That's a sharper edge than it looks: adding a
+starter to `pom.xml` can silently add an indicator, and a dependency on something non-critical
+then gets a veto over whether the service is considered alive. That's exactly how the mail
+indicator broke three deploys in a row (see Known gaps).
+
+Two ways to keep that from recurring, in order of preference:
+
+1. **Keep non-critical indicators off** — the current approach. `management.health.mail.enabled:
+   false`. Explicit, and keeps `/actuator/health` meaningful for the things that genuinely
+   matter (Postgres, Redis).
+2. **Point the healthcheck at `/actuator/health/readiness` instead.** The readiness group only
+   contains the readiness state, so it answers "can this instance serve traffic" rather than "is
+   every dependency reachable" — immune to this whole class of problem by construction. Arguably
+   the more correct question for a platform healthcheck, since restarting a container does
+   nothing about a down database anyway. Not done here because it changes what a failed deploy
+   means, which is worth a deliberate decision rather than a drive-by change.
+
+If a deploy fails while the logs show `Started KnowYourInterviewApplication`, the healthcheck is
+where to look first — hit `/actuator/health` with an admin token to see the component breakdown
+(`show-details: when-authorized`) and find which one is `DOWN`.
+
 ## Deploying a change
 
 Push to `main` on GitHub, then trigger a Railway deploy. **`redeploy` (the "redeploy" action on an existing deployment) replays that deployment's original build — including whatever commit and service config were live when it was first created — not the current HEAD.** This tripped things up repeatedly during initial setup: after pushing a fix, several `redeploy` calls kept rebuilding the same old broken commit. What actually works to deploy fresh code:
@@ -136,6 +161,7 @@ Not yet smoke-tested: register/login, submit-experience flow, Razorpay checkout 
 
 ## Known gaps
 
+- **Actuator's mail health indicator is disabled on purpose** (`management.health.mail.enabled: false`). Adding `spring-boot-starter-mail` auto-registers it whenever a `JavaMailSender` bean exists — which is always here, since `spring.mail.host: ${MAIL_HOST:}` leaves the property present-but-empty and the auto-configuration only checks for presence. It then opened an SMTP connection to a blank host on every health check, failed, and took the aggregate `/actuator/health` to `DOWN`, i.e. a 503 on the exact path Railway's healthcheck polls. Every deploy after the email feature was marked FAILED while the app booted perfectly in 7.5s. Don't re-enable it without also making the healthcheck immune (see "Healthcheck" below).
 - **Email delivery is configured by env var, and unset means nothing sends.** The app talks SMTP (`spring-boot-starter-mail`), so any provider works — Postmark, SendGrid, Resend, Mailgun. With `MAIL_HOST` unset, `EmailConfig` falls back to `LoggingEmailSender`, which writes the whole message (including the link) to the API log rather than sending it: fine locally, not fine in production, where it means confirmation and reset links only reach whoever can read the logs. Setting it up is three steps: create the provider account, verify a sending domain, then set `MAIL_HOST` / `MAIL_USERNAME` / `MAIL_PASSWORD` / `MAIL_FROM_ADDRESS` (plus `WEB_BASE_URL`, or the links will point at localhost). No redeploy of `web` needed — these are all API-side.
 - **`TRUST_FORWARDED_FOR` must be set here.** See the env var table — without it the auth rate limits apply to the whole user base collectively rather than per client, because every request arrives from Railway's edge IP.
 - **Razorpay isn't configured** (`RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET`/`RAZORPAY_WEBHOOK_SECRET` unset) — the unlock-purchase flow will fail with a clear error the moment someone tries to check out, everything else works fine. Add Test Mode keys first, then a webhook pointed at `https://api-production-3c744.up.railway.app/api/v1/payments/webhook` before flipping to live keys.

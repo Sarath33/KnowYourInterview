@@ -68,10 +68,25 @@ class AuthFlowIT {
         redisTemplate.getConnectionFactory().getConnection().serverCommands().flushDb();
     }
 
+    /**
+     * Also the regression test for a healthcheck outage this suite would have caught if it had
+     * been run: adding spring-boot-starter-mail auto-registers Actuator's MailHealthIndicator
+     * whenever a JavaMailSender bean exists, and that bean exists even with no mail configured
+     * (`spring.mail.host: ${MAIL_HOST:}` is present-but-empty, which is all Spring Boot's mail
+     * auto-configuration checks for). The indicator opened an SMTP connection to a blank host,
+     * failed, and took the aggregate health DOWN — a 503 on the exact path Railway polls, so
+     * every deploy was marked FAILED while the app itself ran perfectly. Fixed by
+     * `management.health.mail.enabled: false`; see the reasoning in application.yml.
+     * <p>
+     * This runs with mail unconfigured (the class pins a blank host, same as production had),
+     * so a regression puts this test straight back to red.
+     */
     @Test
     void actuatorHealthReflectsRealDbAndRedisAndHidesDetailFromNonAdmins() {
         ResponseEntity<String> anonymous = restTemplate.getForEntity("/actuator/health", String.class);
-        assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(anonymous.getStatusCode())
+                .as("a 503 here is what fails the platform healthcheck and rolls back the deploy")
+                .isEqualTo(HttpStatus.OK);
         assertThat(anonymous.getBody()).contains("\"status\":\"UP\"");
         // show-details: when-authorized + roles: ADMIN (application.yml) — an
         // unauthenticated caller shouldn't see the DB/Redis component breakdown.
@@ -96,6 +111,12 @@ class AuthFlowIT {
                 "/actuator/health", HttpMethod.GET, new HttpEntity<>(adminHeaders), String.class);
         assertThat(asAdmin.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(asAdmin.getBody()).contains("\"db\"").contains("\"redis\"");
+        // The component that must NOT be here. Its presence means the mail indicator got
+        // re-enabled, which puts an unreachable SMTP server back in charge of whether the
+        // platform considers this service alive.
+        assertThat(asAdmin.getBody())
+                .as("mail must not be a health component — see management.health.mail.enabled")
+                .doesNotContain("\"mail\"");
     }
 
     @Test
