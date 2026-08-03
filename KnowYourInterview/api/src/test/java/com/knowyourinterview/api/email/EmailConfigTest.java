@@ -30,8 +30,8 @@ class EmailConfigTest {
     }
 
     @Test
-    void fallsBackToLoggingWhenNoHostIsConfigured() {
-        EmailSender sender = config.emailSender(providerOf(null), "", "no-reply@example.com", "KYI");
+    void fallsBackToLoggingWhenNoHostOrResendKeyIsConfigured() {
+        EmailSender sender = config.emailSender(providerOf(null), "", "", "no-reply@example.com", "KYI");
 
         assertThat(sender).isInstanceOf(LoggingEmailSender.class);
     }
@@ -41,16 +41,34 @@ class EmailConfigTest {
     @Test
     void fallsBackToLoggingWhenTheHostIsBlankEvenIfAMailSenderBeanExists() {
         EmailSender sender = config.emailSender(
-                providerOf(mock(JavaMailSender.class)), "   ", "no-reply@example.com", "KYI");
+                providerOf(mock(JavaMailSender.class)), "   ", "", "no-reply@example.com", "KYI");
 
         assertThat(sender).isInstanceOf(LoggingEmailSender.class);
     }
 
     @Test
-    void usesSmtpWhenAHostAndMailSenderAreBothPresent() {
+    void usesSmtpWhenAHostAndMailSenderAreBothPresentAndNoResendKeyIsSet() {
         EmailSender sender = config.emailSender(
-                providerOf(mock(JavaMailSender.class)), "smtp.example.com", "no-reply@example.com", "KYI");
+                providerOf(mock(JavaMailSender.class)), "smtp.example.com", "", "no-reply@example.com", "KYI");
 
         assertThat(sender).isInstanceOf(SmtpEmailSender.class);
+    }
+
+    /** Resend takes priority over SMTP even when both are configured — see EmailConfig's
+     * Javadoc for why (Railway blocks outbound SMTP, so SMTP "winning" would silently fail). */
+    @Test
+    void usesResendApiWhenResendKeyIsSetEvenIfSmtpIsAlsoConfigured() {
+        EmailSender sender = config.emailSender(
+                providerOf(mock(JavaMailSender.class)), "smtp.example.com", "re_test_key",
+                "no-reply@example.com", "KYI");
+
+        assertThat(sender).isInstanceOf(ResendApiEmailSender.class);
+    }
+
+    @Test
+    void usesResendApiWhenOnlyResendKeyIsConfigured() {
+        EmailSender sender = config.emailSender(providerOf(null), "", "re_test_key", "no-reply@example.com", "KYI");
+
+        assertThat(sender).isInstanceOf(ResendApiEmailSender.class);
     }
 }
