@@ -5,13 +5,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.List;
-import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * Sends via Resend's HTTP API ({@code POST https://api.resend.com/emails}) instead of SMTP.
@@ -35,7 +31,6 @@ public class ResendApiEmailSender implements EmailSender {
     private static final URI ENDPOINT = URI.create("https://api.resend.com/emails");
 
     private final HttpClient httpClient;
-    private final ObjectMapper objectMapper;
     private final String apiKey;
     private final String fromAddress;
     private final String fromName;
@@ -49,7 +44,6 @@ public class ResendApiEmailSender implements EmailSender {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
-        this.objectMapper = new ObjectMapper();
     }
 
     @Override
@@ -58,13 +52,19 @@ public class ResendApiEmailSender implements EmailSender {
                 ? fromName + " <" + fromAddress + ">"
                 : fromAddress;
         try {
-            Map<String, Object> payload = Map.of(
-                    "from", from,
-                    "to", List.of(to),
-                    "subject", subject,
-                    "html", htmlBody,
-                    "text", textBody);
-            String body = objectMapper.writeValueAsString(payload);
+            // Hand-built rather than via Jackson's ObjectMapper: Spring Boot 4 moved Jackson's
+            // databind module to Jackson 3 (package `tools.jackson.databind`, not the classic
+            // `com.fasterxml.jackson.databind` — only jackson-annotations kept its old package,
+            // which is why that one's still used elsewhere in this codebase). Five known-flat
+            // string fields don't need a JSON library either way, and this sidesteps being
+            // coupled to whichever Jackson major version happens to be on the classpath.
+            String body = "{"
+                    + "\"from\":" + jsonString(from) + ","
+                    + "\"to\":[" + jsonString(to) + "],"
+                    + "\"subject\":" + jsonString(subject) + ","
+                    + "\"html\":" + jsonString(htmlBody) + ","
+                    + "\"text\":" + jsonString(textBody)
+                    + "}";
 
             HttpRequest request = HttpRequest.newBuilder(ENDPOINT)
                     .timeout(Duration.ofSeconds(10))
@@ -87,5 +87,36 @@ public class ResendApiEmailSender implements EmailSender {
         } catch (Exception e) {
             log.error("Failed to send \"{}\" email to {}", subject, to, e);
         }
+    }
+
+    /**
+     * Minimal JSON string-literal encoder — quotes and escapes exactly what
+     * {@link com.knowyourinterview.api.email.AuthEmails}'s generated subjects/bodies can
+     * actually contain (arbitrary text, but no embedded JSON structure), which is all this
+     * needs. Not a general-purpose JSON writer; see the comment in {@link #send} for why one
+     * isn't used here.
+     */
+    private static String jsonString(String s) {
+        StringBuilder sb = new StringBuilder(s.length() + 16);
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        sb.append('"');
+        return sb.toString();
     }
 }
