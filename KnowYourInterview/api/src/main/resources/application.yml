@@ -152,6 +152,11 @@ app:
     # rest of the configuration being right.
     from-address: ${MAIL_FROM_ADDRESS:no-reply@knowyourinterview.local}
     from-name: ${MAIL_FROM_NAME:Know Your Interview}
+    # Set this (rather than the MAIL_* SMTP vars) to send via Resend's HTTP API over 443
+    # instead of SMTP. Recommended on Railway specifically: outbound SMTP (587 and 465 both)
+    # is blocked there, confirmed by production connect-timeout errors in ResendApiEmailSender's
+    # predecessor attempt. Blank = not used, EmailConfig falls through to the MAIL_HOST check.
+    resend-api-key: ${RESEND_API_KEY:}
   storage:
     # Local-disk proof storage for dev. Swap for an S3-backed implementation of
     # ProofStorageService in Phase 6 without touching callers.
