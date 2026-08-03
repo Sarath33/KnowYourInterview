@@ -9,6 +9,7 @@ import { OutcomeTag, RemoteTag } from "./tags";
 import { ArrowLeftIcon, LockIcon } from "./icons";
 import { formatPaise, interviewedLabel, levelLine, roundCountLabel, viewCountLabel } from "../lib/format";
 import { roundTypeLabel } from "../lib/roundTypes";
+import { CommentsSection } from "./CommentsSection";
 
 export function ExperienceDetail({
   experienceId,
@@ -117,7 +118,13 @@ export function ExperienceDetail({
         />
       )}
       {view && view.entitled && (
-        <FullExperience full={view.full} user={user} unpublishing={unpublishing} onUnpublish={unpublish} />
+        <FullExperience
+          full={view.full}
+          user={user}
+          unpublishing={unpublishing}
+          onUnpublish={unpublish}
+          onLoginRequired={onLoginRequired}
+        />
       )}
     </div>
   );
@@ -197,11 +204,13 @@ function FullExperience({
   user,
   unpublishing,
   onUnpublish,
+  onLoginRequired,
 }: {
   full: ExperienceFull;
   user: User | null;
   unpublishing: boolean;
   onUnpublish: () => void;
+  onLoginRequired: () => void;
 }) {
   const hasStats = full.timeline || full.compensation || full.overallDifficulty;
   const isSelfFreeContribution = full.isFree && !full.sourceUrl;
@@ -331,6 +340,12 @@ function FullExperience({
           ))}
         </div>
       )}
+
+      <CommentsSection
+        experienceId={full.id}
+        authorId={full.contributorId}
+        onLoginRequired={onLoginRequired}
+      />
     </div>
   );
 }

@@ -19,6 +19,8 @@ import type {
   ExperienceEditSnapshot,
   ExperienceTeaser,
   ExperienceView,
+  ExperienceComment,
+  CreateCommentRequest,
   ProofDocument,
   PagedResponse,
   CreateOrderResponse,
@@ -364,6 +366,28 @@ export async function getExperience(id: string): Promise<ExperienceView> {
 export async function getSearchSuggestions(q: string, limit = 6): Promise<ExperienceTeaser[]> {
   const query = new URLSearchParams({ q, limit: String(limit) });
   return request(`/api/v1/experiences/suggestions?${query.toString()}`);
+}
+
+// --- Comments (gated to viewers with full access; GET is public for free experiences) ---
+
+export async function listComments(experienceId: string): Promise<ExperienceComment[]> {
+  return request(`/api/v1/experiences/${experienceId}/comments`);
+}
+
+export async function createComment(
+  experienceId: string,
+  body: CreateCommentRequest,
+): Promise<ExperienceComment> {
+  return request(`/api/v1/experiences/${experienceId}/comments`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteComment(experienceId: string, commentId: string): Promise<void> {
+  return request(`/api/v1/experiences/${experienceId}/comments/${commentId}`, {
+    method: "DELETE",
+  });
 }
 
 /**

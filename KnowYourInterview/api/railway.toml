@@ -1,0 +1,15 @@
+# Railway service config for `api` (config-as-code — overrides the dashboard for the
+# fields set here; anything omitted keeps its dashboard value).
+#
+# Healthcheck points at the READINESS group, not the aggregate /actuator/health.
+# The aggregate fails the deploy if ANY registered indicator is DOWN — that's how the
+# mail indicator (and now another non-critical one) marked deploys FAILED even though the
+# app booted and serves traffic fine. /actuator/health/readiness reflects the app's own
+# readiness state (ACCEPTING_TRAFFIC once started), so a flaky non-critical dependency
+# can't veto a deploy. Postgres/Redis reachability is still observable at /actuator/health
+# (admin-authorized) for real monitoring — it just no longer gates the platform healthcheck.
+# See docs/06-deployment.md "Healthcheck".
+
+[deploy]
+healthcheckPath = "/actuator/health/readiness"
+healthcheckTimeout = 300

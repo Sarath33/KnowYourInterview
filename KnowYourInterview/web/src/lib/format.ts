@@ -40,3 +40,19 @@ export function formatPaise(paise: number): string {
 export function levelLine(exp: { level?: string; location?: string }): string {
   return [exp.level, exp.location].filter(Boolean).join(" · ") || "—";
 }
+
+/** Short relative time for comment timestamps: "just now", "5m", "3h", "2d", then an
+ * absolute date once it's older than a week. Falls back to the raw string if unparseable. */
+export function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (secs < 45) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  return new Date(then).toLocaleDateString();
+}

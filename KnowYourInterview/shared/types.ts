@@ -397,3 +397,29 @@ export interface PayoutAccountRequest {
 export interface DeleteAccountRequest {
   password?: string;
 }
+
+// --- Comments ---
+
+/** A comment on an experience. One level of nesting: top-level comments carry their
+ * `replies`; a reply's `replies` is always empty. A soft-deleted comment keeps its id,
+ * parentId, createdAt and replies but nulls out the author and shows body "[deleted]". */
+export interface ExperienceComment {
+  id: string;
+  parentId: string | null;
+  authorId: string | null;
+  authorName: string | null;
+  body: string;
+  createdAt: string;
+  deleted: boolean;
+  /** Whether the current viewer may delete this comment (its author, or an admin). */
+  canDelete: boolean;
+  /** The comment's author is the experience's contributor (drives the "Author" badge). */
+  authorIsContributor: boolean;
+  replies: ExperienceComment[];
+}
+
+export interface CreateCommentRequest {
+  body: string;
+  /** Omitted/null for a top-level comment; the id of a top-level comment for a reply. */
+  parentId?: string | null;
+}

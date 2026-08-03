@@ -116,6 +116,13 @@ public class SecurityConfig {
                         // Browse is public (teaser-only unless the JWT filter identifies the
                         // caller as the owner/an admin — see ExperienceService.getPublicView).
                         .requestMatchers(HttpMethod.GET, "/api/v1/experiences", "/api/v1/experiences/*").permitAll()
+                        // Reading comments is public so a guest can read a free experience's
+                        // thread. This is a distinct two-segment path ("/experiences/{id}/comments")
+                        // that the single-segment "/experiences/*" wildcard above does NOT match,
+                        // so it needs its own rule. GET only — POST/DELETE fall through to
+                        // anyRequest().authenticated(); CommentService re-enforces the real access
+                        // rule (a guest gets 403 on a paid experience) regardless.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/experiences/*/comments").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .addFilterBefore(new JwtAuthenticationFilter(jwtService), UsernamePasswordAuthenticationFilter.class)

@@ -76,9 +76,10 @@ public abstract class FunctionalTestBase {
     /** Every table Flyway creates, in an order that doesn't matter because of CASCADE. */
     private static final String TRUNCATE_ALL = """
             TRUNCATE TABLE
-                experience_views, entitlements, purchases, payouts, payout_accounts,
-                review_logs, experience_edit_snapshots, proof_documents, experience_rounds,
-                experiences, password_reset_tokens, email_verification_tokens, users
+                experience_comments, experience_views, entitlements, purchases, payouts,
+                payout_accounts, review_logs, experience_edit_snapshots, proof_documents,
+                experience_rounds, experiences, password_reset_tokens,
+                email_verification_tokens, users
             RESTART IDENTITY CASCADE
             """;
 
